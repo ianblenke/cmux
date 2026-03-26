@@ -54,8 +54,7 @@ let package = Package(
                 .linkedLibrary("gio-2.0"),
                 .linkedLibrary("gobject-2.0"),
                 .linkedLibrary("glib-2.0"),
-                // libghostty linkage disabled — embedded API Zig globals crash on Linux
-                // TODO: Re-enable after making embedded apprt Linux-safe
+                // libghostty loaded via dlopen to avoid Zig global init crash
                 // .unsafeFlags(["-Lghostty/zig-out/lib", "-Xlinker", "-rpath=ghostty/zig-out/lib"]),
                 // .linkedLibrary("ghostty"),
             ]
