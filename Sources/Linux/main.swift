@@ -125,7 +125,7 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
         // Key press
         let keyPressCb: @convention(c) (
             OpaquePointer?, UInt32, UInt32, UInt32, gpointer?
-        ) -> gboolean = { _, keyval, keycode, state, _ in
+        ) -> gboolean = { _, keyval, hwKeycode, state, _ in
             guard let gApp = ghosttyApp else { return 0 }
 
             // Map GDK modifier state to ghostty mods
@@ -135,18 +135,27 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
             if state & UInt32(GDK_ALT_MASK.rawValue) != 0 { mods |= 4 }       // GHOSTTY_MODS_ALT
             if state & UInt32(GDK_SUPER_MASK.rawValue) != 0 { mods |= 8 }     // GHOSTTY_MODS_SUPER
 
+            // Use hardware keycode if valid, otherwise map from keyval
+            let evdevKeycode: UInt32
+            let mappedKeycode = gdkKeyvalToEvdev(keyval)
+            if hwKeycode > 0 && hwKeycode != 9 {
+                // GTK provided a real hardware keycode (not Escape/default)
+                // But verify: if keyval doesn't match Escape, keycode 9 is wrong
+                evdevKeycode = hwKeycode
+            } else if mappedKeycode > 0 {
+                evdevKeycode = mappedKeycode
+            } else {
+                evdevKeycode = hwKeycode
+            }
+
             // Convert keyval to UTF-8 text
             let unichar = gdk_keyval_to_unicode(keyval)
             var text: String? = nil
             if unichar > 0, unichar < 0x110000, let scalar = Unicode.Scalar(unichar) {
-                let ch = Character(scalar)
-                if !ch.isNewline || keyval == GDK_KEY_Return || keyval == GDK_KEY_KP_Enter {
-                    text = String(ch)
-                }
+                text = String(Character(scalar))
             }
 
-            let handled = gApp.sendKey(keycode: keycode, text: text, mods: mods, action: 1)
-            cmuxLog("[key] press keycode=\(keycode) keyval=\(keyval) text=\(text ?? "nil") handled=\(handled)")
+            let handled = gApp.sendKey(keycode: evdevKeycode, text: text, mods: mods, action: 1)
             return handled ? 1 : 0
         }
         g_signal_connect_data(UnsafeMutableRawPointer(keyController), "key-pressed",
@@ -155,14 +164,16 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
         // Key release
         let keyReleaseCb: @convention(c) (
             OpaquePointer?, UInt32, UInt32, UInt32, gpointer?
-        ) -> Void = { _, keyval, keycode, state, _ in
+        ) -> Void = { _, keyval, hwKeycode, state, _ in
             guard let gApp = ghosttyApp else { return }
             var mods: Int32 = 0
             if state & UInt32(GDK_SHIFT_MASK.rawValue) != 0 { mods |= 1 }
             if state & UInt32(GDK_CONTROL_MASK.rawValue) != 0 { mods |= 2 }
             if state & UInt32(GDK_ALT_MASK.rawValue) != 0 { mods |= 4 }
             if state & UInt32(GDK_SUPER_MASK.rawValue) != 0 { mods |= 8 }
-            _ = gApp.sendKey(keycode: keycode, text: nil, mods: mods, action: 0)
+            let evdevKeycode = gdkKeyvalToEvdev(keyval)
+            _ = gApp.sendKey(keycode: evdevKeycode > 0 ? evdevKeycode : hwKeycode,
+                            text: nil, mods: mods, action: 0)
         }
         g_signal_connect_data(UnsafeMutableRawPointer(keyController), "key-released",
             unsafeBitCast(keyReleaseCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
