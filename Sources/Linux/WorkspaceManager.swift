@@ -83,6 +83,35 @@ final class WorkspaceManager {
         cmuxLog("[workspace] Switched to workspace \(index + 1)")
     }
 
+    /// Close the active workspace
+    func closeActive() {
+        guard workspaces.count > 1 else {
+            cmuxLog("[workspace] Can't close last workspace")
+            return
+        }
+        let removed = workspaces.remove(at: activeIndex)
+        cmuxLog("[workspace] Closed workspace \(removed.id)")
+
+        // If we removed a surface, free it
+        if let surface = removed.surface {
+            ghosttyApp?.fn_surface_free?(surface)
+        }
+
+        // Adjust active index
+        if activeIndex >= workspaces.count {
+            activeIndex = workspaces.count - 1
+        }
+
+        // Focus the new active
+        if let newSurface = activeSurface {
+            ghosttyApp?.setFocusOnSurface(newSurface, focused: true)
+        }
+        if let gl = glArea {
+            gtk_gl_area_queue_render(gl)
+        }
+        updateSidebar()
+    }
+
     /// Switch to next workspace
     func next() {
         let nextIdx = (activeIndex + 1) % max(workspaces.count, 1)

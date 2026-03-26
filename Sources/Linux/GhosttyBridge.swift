@@ -100,7 +100,7 @@ final class GhosttyApp {
     private var fn_app_free: (@convention(c) (UnsafeMutableRawPointer?) -> Void)?
     private var fn_app_tick: (@convention(c) (UnsafeMutableRawPointer?) -> Void)?
     private var fn_surface_new: (@convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?)?
-    private var fn_surface_free: (@convention(c) (UnsafeMutableRawPointer?) -> Void)?
+    var fn_surface_free: (@convention(c) (UnsafeMutableRawPointer?) -> Void)?
     private var fn_surface_draw: (@convention(c) (UnsafeMutableRawPointer?) -> Void)?
     private var fn_surface_set_size: (@convention(c) (UnsafeMutableRawPointer?, UInt32, UInt32) -> Void)?
     private var fn_surface_set_focus: (@convention(c) (UnsafeMutableRawPointer?, Bool) -> Void)?
@@ -181,8 +181,9 @@ final class GhosttyApp {
         self.fn_surface_mouse_pos = surface_mouse_pos
         self.fn_surface_mouse_scroll = surface_mouse_scroll
 
-        // Resolve C helper key functions (for correct ABI calling convention)
+        // Resolve C helper functions (for correct ABI calling convention)
         cmux_ghostty_resolve_key_fns(h)
+        cmux_ghostty_resolve_selection_fns(h)
 
         // Step 1: ghostty_init
         cmuxLog("[GhosttyBridge] ghostty_init...")
@@ -275,6 +276,32 @@ final class GhosttyApp {
         text.withCString { cStr in
             cmux_ghostty_surface_text(surface, cStr, text.utf8.count)
         }
+    }
+
+    // MARK: - Clipboard
+
+    /// Copy terminal selection to GDK clipboard. Returns true if copied.
+    func copySelection() -> Bool {
+        guard let surface = surface else { return false }
+        guard let cStr = cmux_ghostty_copy_selection(surface) else { return false }
+        let text = String(cString: cStr)
+        free(cStr)
+        if let display = gdk_display_get_default() {
+            let clipboard = gdk_display_get_clipboard(display)
+            gdk_clipboard_set_text(clipboard, text)
+            cmuxLog("[clipboard] Copied \(text.count) chars")
+            return true
+        }
+        return false
+    }
+
+    /// Paste from GDK clipboard into terminal
+    func pasteFromClipboard() {
+        guard let surface = surface else { return }
+        // GDK async clipboard read — for now use a simpler approach
+        // by reading the clipboard synchronously via the X11/Wayland selection
+        // TODO: Implement proper async GDK clipboard read
+        // For now, we'll use ghostty's built-in paste binding
     }
 
     // MARK: - Mouse input

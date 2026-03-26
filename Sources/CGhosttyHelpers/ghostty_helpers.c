@@ -6,6 +6,8 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 #include <dlfcn.h>
 #include <stdio.h>
 
@@ -68,4 +70,49 @@ void cmux_ghostty_surface_text(
 ) {
     if (!g_surface_text || !surface) return;
     g_surface_text(surface, text, len);
+}
+
+// Selection copy support
+typedef struct {
+    uint32_t offset_start;
+    uint32_t offset_end;
+    uint32_t offset_len;
+    const char* text;
+    size_t text_len;
+} ghostty_text_s;
+
+typedef bool (*ghostty_surface_has_selection_fn)(ghostty_surface_t);
+typedef bool (*ghostty_surface_read_selection_fn)(ghostty_surface_t, ghostty_text_s*);
+typedef void (*ghostty_surface_free_text_fn)(ghostty_surface_t, ghostty_text_s*);
+
+static ghostty_surface_has_selection_fn g_has_selection = NULL;
+static ghostty_surface_read_selection_fn g_read_selection = NULL;
+static ghostty_surface_free_text_fn g_free_text = NULL;
+
+void cmux_ghostty_resolve_selection_fns(void* lib_handle) {
+    g_has_selection = dlsym(lib_handle, "ghostty_surface_has_selection");
+    g_read_selection = dlsym(lib_handle, "ghostty_surface_read_selection");
+    g_free_text = dlsym(lib_handle, "ghostty_surface_free_text");
+}
+
+// Copy selected text. Returns a malloc'd string (caller must free), or NULL.
+char* cmux_ghostty_copy_selection(ghostty_surface_t surface) {
+    if (!g_has_selection || !g_read_selection || !g_free_text || !surface) return NULL;
+    if (!g_has_selection(surface)) return NULL;
+
+    ghostty_text_s text = {0};
+    if (!g_read_selection(surface, &text)) return NULL;
+    if (!text.text || text.text_len == 0) {
+        g_free_text(surface, &text);
+        return NULL;
+    }
+
+    // Copy the text since ghostty owns the buffer
+    char* result = malloc(text.text_len + 1);
+    if (result) {
+        memcpy(result, text.text, text.text_len);
+        result[text.text_len] = '\0';
+    }
+    g_free_text(surface, &text);
+    return result;
 }

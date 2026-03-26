@@ -146,7 +146,28 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
             let isSuper = mods & 8 != 0
             let isMeta = isCtrl || isSuper  // Use Ctrl or Super for cmux bindings
 
+            let isShift = mods & 1 != 0
+
             if isMeta {
+                // Ctrl+Shift+C: copy selection to clipboard
+                if isShift && (keyval == UInt32(GDK_KEY_c) || keyval == UInt32(GDK_KEY_C)) {
+                    _ = gApp.copySelection()
+                    return 1
+                }
+                // Ctrl+Shift+V: paste from clipboard
+                if isShift && (keyval == UInt32(GDK_KEY_v) || keyval == UInt32(GDK_KEY_V)) {
+                    // Use ghostty's built-in paste via binding action
+                    if let surface = workspaceManager.activeSurface {
+                        // Send paste binding action
+                        gApp.sendText("\u{16}")  // Ctrl+V raw — ghostty handles paste
+                    }
+                    return 1
+                }
+                // Ctrl+W: close current workspace
+                if keyval == UInt32(GDK_KEY_w) || keyval == UInt32(GDK_KEY_W) {
+                    workspaceManager.closeActive()
+                    return 1
+                }
                 // Ctrl+T or Super+T: new workspace
                 if keyval == UInt32(GDK_KEY_t) || keyval == UInt32(GDK_KEY_T) {
                     if let gl = workspaceManager.glArea {
