@@ -91,17 +91,23 @@ typedef struct {
 
 // Action tag constants
 #define ACTION_RENDER 27
+#define ACTION_DESKTOP_NOTIFICATION 31
 #define ACTION_SET_TITLE 32
 #define ACTION_PWD 34
+#define ACTION_RING_BELL 49
 
-// Swift callback for title changes
+// Swift callbacks
 typedef void (*cmux_title_changed_cb)(const char* title);
 typedef void (*cmux_pwd_changed_cb)(const char* pwd);
 typedef void (*cmux_render_cb)(void);
+typedef void (*cmux_notification_cb)(const char* title, const char* body);
+typedef void (*cmux_bell_cb)(void);
 
 static cmux_title_changed_cb g_title_cb = NULL;
 static cmux_pwd_changed_cb g_pwd_cb = NULL;
 static cmux_render_cb g_render_cb = NULL;
+static cmux_notification_cb g_notification_cb = NULL;
+static cmux_bell_cb g_bell_cb = NULL;
 
 void cmux_set_action_callbacks(
     cmux_title_changed_cb title_cb,
@@ -111,6 +117,14 @@ void cmux_set_action_callbacks(
     g_title_cb = title_cb;
     g_pwd_cb = pwd_cb;
     g_render_cb = render_cb;
+}
+
+void cmux_set_notification_callbacks(
+    cmux_notification_cb notification_cb,
+    cmux_bell_cb bell_cb
+) {
+    g_notification_cb = notification_cb;
+    g_bell_cb = bell_cb;
 }
 
 // ghostty structs we need to receive by value
@@ -150,6 +164,18 @@ bool cmux_ghostty_action_handler(
         case ACTION_PWD:
             if (g_pwd_cb && action.pwd.pwd)
                 g_pwd_cb(action.pwd.pwd);
+            return true;
+        case ACTION_DESKTOP_NOTIFICATION: {
+            // desktop_notification_s has {title, body} at union start
+            const char** ptrs = (const char**)&action._pad;  // union starts after tag+pad
+            const char* title = ptrs[0];
+            const char* body = ptrs[1];
+            if (g_notification_cb)
+                g_notification_cb(title ? title : "", body ? body : "");
+            return true;
+        }
+        case ACTION_RING_BELL:
+            if (g_bell_cb) g_bell_cb();
             return true;
         default:
             return false;

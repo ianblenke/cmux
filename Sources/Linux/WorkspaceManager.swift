@@ -11,8 +11,10 @@ struct Workspace {
     var title: String
     var surface: UnsafeMutableRawPointer?  // primary surface (first pane)
     var cwd: String
-    var rootPane: PaneNode?  // pane tree (nil = single surface, old style)
-    var contentWidget: UnsafeMutablePointer<GtkWidget>?  // current widget in content area
+    var hasUnread: Bool = false
+    var lastNotification: String?
+    var rootPane: PaneNode?
+    var contentWidget: UnsafeMutablePointer<GtkWidget>?
 
     init(id: Int, title: String? = nil, cwd: String = "~") {
         self.id = id
@@ -73,6 +75,7 @@ final class WorkspaceManager {
         }
 
         activeIndex = index
+        clearUnread(index: index)
 
         // Focus new surface
         if let newSurface = activeSurface {
@@ -87,6 +90,39 @@ final class WorkspaceManager {
         updateSidebar()
         updateWindowTitle()
         cmuxLog("[workspace] Switched to workspace \(index + 1)")
+    }
+
+    /// Mark active workspace as having a notification (for non-focused workspaces)
+    func notifyActive(title: String, body: String) {
+        guard activeIndex >= 0, activeIndex < workspaces.count else { return }
+        let msg = body.isEmpty ? title : "\(title): \(body)"
+        workspaces[activeIndex].lastNotification = msg
+        // Mark non-active workspaces as unread when they get notifications
+        // (In practice, notifications come from the focused surface, so this
+        //  would be useful when we track per-surface notifications)
+        g_idle_add({ _ -> gboolean in
+            workspaceManager.updateSidebar()
+            return 0
+        }, nil)
+        cmuxLog("[notification] \(msg)")
+    }
+
+    /// Mark active workspace as having a bell
+    func bellActive() {
+        guard activeIndex >= 0, activeIndex < workspaces.count else { return }
+        workspaces[activeIndex].hasUnread = true
+        g_idle_add({ _ -> gboolean in
+            workspaceManager.updateSidebar()
+            return 0
+        }, nil)
+        cmuxLog("[bell] Workspace \(workspaces[activeIndex].id)")
+    }
+
+    /// Clear unread state when switching to a workspace
+    func clearUnread(index: Int) {
+        guard index >= 0, index < workspaces.count else { return }
+        workspaces[index].hasUnread = false
+        workspaces[index].lastNotification = nil
     }
 
     /// Pending title/cwd updates (set from any thread, applied on main thread)
@@ -271,9 +307,10 @@ final class WorkspaceManager {
         // Add workspace entries
         for (i, ws) in workspaces.enumerated() {
             let prefix = i == activeIndex ? "▸ " : "  "
-            // Show the workspace title (extracted CWD path)
+            // Show the workspace title with notification indicator
+            let notifMark = ws.hasUnread ? " *" : ""
             let displayText = ws.title
-            let label = gtk_label_new("\(prefix)\(displayText)")
+            let label = gtk_label_new("\(prefix)\(displayText)\(notifMark)")
             gtk_widget_set_halign(label, GTK_ALIGN_START)
             // Ellipsize handled by truncating in Swift
 

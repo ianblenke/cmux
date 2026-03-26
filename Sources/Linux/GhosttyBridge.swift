@@ -172,6 +172,33 @@ final class GhosttyApp {
         cmux_ghostty_resolve_selection_fns(h)
 
         // Set up action callbacks for title/pwd/render
+        // Notification callbacks
+        cmux_set_notification_callbacks(
+            // Desktop notification (OSC 9/99/777)
+            { title, body in
+                let t: String
+                if let title = title, title[0] != 0 {
+                    t = String(cString: title)
+                } else {
+                    t = ""
+                }
+                let b: String
+                if let body = body, body[0] != 0 {
+                    b = String(cString: body)
+                } else {
+                    b = ""
+                }
+                if !t.isEmpty || !b.isEmpty {
+                    workspaceManager.notifyActive(title: t, body: b)
+                }
+            },
+            // Bell
+            {
+                workspaceManager.bellActive()
+            }
+        )
+
+        // Action callbacks
         cmux_set_action_callbacks(
             // Title changed
             { title in

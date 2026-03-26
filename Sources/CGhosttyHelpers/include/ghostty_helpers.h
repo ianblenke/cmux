@@ -16,8 +16,12 @@ void cmux_set_action_callbacks(
     cmux_render_cb render_cb
 );
 
+// Notification callbacks
+typedef void (*cmux_notification_cb)(const char* title, const char* body);
+typedef void (*cmux_bell_cb)(void);
+void cmux_set_notification_callbacks(cmux_notification_cb, cmux_bell_cb);
+
 // Get the action handler function pointer (correct ABI for ghostty)
-// Store this in the runtime config's action_cb field.
 void* cmux_ghostty_get_action_handler(void);
 
 bool cmux_ghostty_surface_key(
