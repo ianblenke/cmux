@@ -114,6 +114,10 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
 
 // MARK: - Main
 
+// Force GDK to use desktop OpenGL (not GLES/Vulkan) — same as Ghostty GTK apprt.
+// Without this, GDK defaults to GLES which reports GL 3.0/4.0 and GLAD can't load 4.3+.
+setenv("GDK_DISABLE", "gles-api,vulkan", 1)
+
 guard let app = gtk_application_new("com.cmux.linux", G_APPLICATION_DEFAULT_FLAGS) else {
     fatalError("Failed to create GtkApplication")
 }
