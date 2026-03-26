@@ -27,6 +27,7 @@ final class WorkspaceManager {
     // GTK widgets (set by main.swift)
     var sidebarBox: UnsafeMutablePointer<GtkBox>?
     var glArea: UnsafeMutablePointer<GtkGLArea>?
+    var window: UnsafeMutablePointer<GtkWindow>?
 
     var activeWorkspace: Workspace? {
         guard activeIndex >= 0, activeIndex < workspaces.count else { return nil }
@@ -80,6 +81,7 @@ final class WorkspaceManager {
         }
 
         updateSidebar()
+        updateWindowTitle()
         cmuxLog("[workspace] Switched to workspace \(index + 1)")
     }
 
@@ -127,6 +129,7 @@ final class WorkspaceManager {
 
         if changed {
             updateSidebar()
+            updateWindowTitle()
         }
     }
 
@@ -169,6 +172,16 @@ final class WorkspaceManager {
     func previous() {
         let prevIdx = activeIndex > 0 ? activeIndex - 1 : max(workspaces.count - 1, 0)
         switchTo(index: prevIdx)
+    }
+
+    /// Update the window title to show active workspace info
+    func updateWindowTitle() {
+        guard let win = window else { return }
+        if let ws = activeWorkspace {
+            gtk_window_set_title(win, "cmux — \(ws.title)")
+        } else {
+            gtk_window_set_title(win, "cmux")
+        }
     }
 
     /// Update the sidebar GTK widget to reflect current workspaces

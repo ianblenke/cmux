@@ -37,6 +37,7 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
     gtk_widget_set_size_request(sidebar, 220, -1)
     let sidebarBox = unsafeBitCast(sidebar, to: UnsafeMutablePointer<GtkBox>.self)
     workspaceManager.sidebarBox = sidebarBox
+    workspaceManager.window = win
     gtk_box_append(sidebarBox, gtk_label_new("Workspaces"))
     gtk_box_append(hboxPtr, sidebar)
     gtk_box_append(hboxPtr, gtk_separator_new(GTK_ORIENTATION_VERTICAL))
