@@ -47,13 +47,19 @@ let package = Package(
         // Linux GTK4 application
         .executableTarget(
             name: "cmux-linux",
-            dependencies: ["cmux-pal", "cmux-core", "CGtk4"],
+            dependencies: ["cmux-pal", "cmux-core", "CGtk4", "CGhostty"],
             path: "Sources/Linux",
+            cSettings: [
+                .headerSearchPath("../CGhostty"),
+            ],
             linkerSettings: [
                 .linkedLibrary("gtk-4"),
                 .linkedLibrary("gio-2.0"),
                 .linkedLibrary("gobject-2.0"),
                 .linkedLibrary("glib-2.0"),
+                // libghostty built from ghostty submodule
+                .unsafeFlags(["-Lghostty/zig-out/lib"]),
+                .linkedLibrary("ghostty"),
             ]
         )
     ]

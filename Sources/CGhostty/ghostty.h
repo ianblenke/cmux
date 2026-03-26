@@ -435,7 +435,7 @@ typedef struct {
 typedef union {
   ghostty_platform_macos_s macos;
   ghostty_platform_ios_s ios;
-  ghostty_platform_linux_s linux;
+  ghostty_platform_linux_s gtk;  // 'linux' is a predefined macro in GCC
 } ghostty_platform_u;
 
 typedef enum {
