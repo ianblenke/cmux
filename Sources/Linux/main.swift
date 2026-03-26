@@ -17,9 +17,9 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
     let appWidget = unsafeBitCast(appPtr, to: UnsafeMutablePointer<GtkApplication>.self)
 
     // Initialize Ghostty
-    fputs("[cmux] Initializing ghostty...\n", stderr)
+    cmuxLog("[cmux] Initializing ghostty...")
     ghosttyApp = GhosttyApp()
-    fputs("[cmux] Ghostty: \(ghosttyApp != nil ? "ready" : "FAILED")\n", stderr)
+    cmuxLog("[cmux] Ghostty: \(ghosttyApp != nil ? "ready" : "FAILED")")
 
     // Window
     guard let window = gtk_application_window_new(appWidget) else { return }
@@ -72,7 +72,7 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
             // Make GL context current BEFORE creating surface —
             // the OpenGL renderer needs it during initialization
             gtk_gl_area_make_current(glPtr)
-            fputs("[cmux] GL context current, creating surface...\n", stderr)
+            cmuxLog("[cmux] GL context current, creating surface...")
             let ok = gApp.createSurface(glArea: glPtr, widget: widget)
             if ok {
                 let w = gtk_widget_get_width(widget)
@@ -83,7 +83,7 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
                 gApp.setFocus(true)
                 let scale = Double(gtk_widget_get_scale_factor(widget))
                 gApp.setContentScale(scale, scale)
-                fputs("[cmux] Surface ready: \(w)x\(h) @\(scale)x\n", stderr)
+                cmuxLog("[cmux] Surface ready: \(w)x\(h) @\(scale)x")
             }
         }
         g_signal_connect_data(glArea, "realize",
@@ -109,16 +109,25 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
 
     gtk_box_append(hboxPtr, content)
     gtk_window_present(win)
-    fputs("[cmux] Window presented\n", stderr)
+    cmuxLog("[cmux] Window presented")
 }
 
 // MARK: - Main
 
-// Force GDK to use desktop OpenGL (not GLES/Vulkan) — same as Ghostty GTK apprt.
-// Without this, GDK defaults to GLES which reports GL 3.0/4.0 and GLAD can't load 4.3+.
-setenv("GDK_DISABLE", "gles-api,vulkan", 1)
+// Log to file since stderr gets lost with GTK
+let logFile = fopen("/tmp/cmux-linux.log", "w")
+func cmuxLog(_ msg: String) {
+    if let f = logFile {
+        fputs("\(msg)\n", f)
+        fflush(f)
+    }
+}
 
-guard let app = gtk_application_new("com.cmux.linux", G_APPLICATION_DEFAULT_FLAGS) else {
+// Force GDK to use desktop OpenGL (not GLES/Vulkan) — same as Ghostty GTK apprt.
+setenv("GDK_DISABLE", "gles-api,vulkan", 1)
+cmuxLog("cmux starting...")
+
+guard let app = gtk_application_new("com.cmux.linux", G_APPLICATION_NON_UNIQUE) else {
     fatalError("Failed to create GtkApplication")
 }
 let callback: @convention(c) (OpaquePointer?, gpointer?) -> Void = activateApp

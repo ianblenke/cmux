@@ -8,9 +8,6 @@ import CGtk4
 import Glibc
 #endif
 
-// MARK: - Constants
-
-private let GHOSTTY_ACTION_RENDER: Int32 = 27
 
 // MARK: - Global state for callbacks
 
@@ -20,20 +17,28 @@ var globalGLArea: UnsafeMutablePointer<GtkGLArea>?
 // MARK: - Callbacks
 
 private let wakeupCb: @convention(c) (UnsafeMutableRawPointer?) -> Void = { _ in
-    // Schedule a tick on the GTK main loop
-    g_idle_add({ _ -> gboolean in 0 }, nil)
+    // Schedule ghostty_app_tick on the GTK main loop
+    g_idle_add({ _ -> gboolean in
+        ghosttyApp?.tick()
+        return 0 // G_SOURCE_REMOVE — one-shot
+    }, nil)
 }
 
-// The action callback. ghostty_target_s (16 bytes) and ghostty_action_s (32 bytes)
-// are passed by value in the C ABI. We can't easily destructure them from Swift
-// with dlopen, so we accept the raw bytes and return false for now.
-// The render action will be handled via ghostty_surface_draw() from the
-// GtkGLArea render signal instead.
+// The action callback. On x86_64 SysV ABI, ghostty_action_s (32 bytes)
+// is passed via hidden pointer. The tag is at offset 0.
+private let GHOSTTY_ACTION_RENDER: Int32 = 27
+private let GHOSTTY_ACTION_QUIT: Int32 = 40
+
 private let actionCb: @convention(c) (
     UnsafeMutableRawPointer?,  // ghostty_app_t
-    UnsafeMutableRawPointer?,  // ghostty_target_s (by-value, passed as pointer on x86_64)
-    UnsafeMutableRawPointer?   // ghostty_action_s (by-value, passed as pointer on x86_64)
-) -> Bool = { _, _, _ in
+    UnsafeMutableRawPointer?,  // ghostty_target_s
+    UnsafeMutableRawPointer?   // ghostty_action_s
+) -> Bool = { _, _, actionPtr in
+    // Try to read the action tag — the struct is passed by hidden pointer
+    // on x86_64 for >16 byte structs
+    if let glArea = globalGLArea {
+        gtk_gl_area_queue_render(glArea)
+    }
     return false
 }
 
@@ -51,8 +56,9 @@ private let writeClipboardCb: @convention(c) (
 
 private let closeSurfaceCb: @convention(c) (
     UnsafeMutableRawPointer?, Bool
-) -> Void = { _, _ in
-    fputs("[GhosttyBridge] Surface close requested\n", stderr)
+) -> Void = { _, processActive in
+    cmuxLog("[GhosttyBridge] Surface close requested (processActive=\(processActive))")
+    // Don't exit — keep the window open
 }
 
 // MARK: - Ghostty App (dlopen-based)
@@ -87,12 +93,12 @@ final class GhosttyApp {
         for path in paths {
             handle = dlopen(path, RTLD_NOW)
             if handle != nil {
-                fputs("[GhosttyBridge] Loaded: \(path)\n", stderr)
+                cmuxLog("[GhosttyBridge] Loaded: \(path)")
                 break
             }
         }
         guard let h = handle else {
-            fputs("[GhosttyBridge] dlopen failed: \(dlerror().map { String(cString: $0) } ?? "?")\n", stderr)
+            cmuxLog("[GhosttyBridge] dlopen failed: \(dlerror().map { String(cString: $0) } ?? "?")")
             return nil
         }
 
@@ -118,7 +124,7 @@ final class GhosttyApp {
               let surface_set_focus: @convention(c) (UnsafeMutableRawPointer?, Bool) -> Void = sym("ghostty_surface_set_focus"),
               let surface_set_scale: @convention(c) (UnsafeMutableRawPointer?, Double, Double) -> Void = sym("ghostty_surface_set_content_scale")
         else {
-            fputs("[GhosttyBridge] Symbol resolution failed\n", stderr)
+            cmuxLog("[GhosttyBridge] Symbol resolution failed")
             dlclose(h); handle = nil; return nil
         }
 
@@ -134,22 +140,22 @@ final class GhosttyApp {
         self.fn_surface_set_content_scale = surface_set_scale
 
         // Step 1: ghostty_init
-        fputs("[GhosttyBridge] ghostty_init...\n", stderr)
+        cmuxLog("[GhosttyBridge] ghostty_init...")
         let initResult = ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv)
         guard initResult == 0 else {
-            fputs("[GhosttyBridge] ghostty_init failed: \(initResult)\n", stderr)
+            cmuxLog("[GhosttyBridge] ghostty_init failed: \(initResult)")
             return nil
         }
 
         // Step 2: Config
-        fputs("[GhosttyBridge] config...\n", stderr)
+        cmuxLog("[GhosttyBridge] config...")
         config = config_new()
         guard config != nil else { return nil }
         config_load(config)
         config_finalize(config)
 
         // Step 3: App with runtime config (64 bytes)
-        fputs("[GhosttyBridge] app_new...\n", stderr)
+        cmuxLog("[GhosttyBridge] app_new...")
         var rtConfig = [UInt8](repeating: 0, count: 64)
         rtConfig.withUnsafeMutableBytes { buf in
             buf.storeBytes(of: true, toByteOffset: 8, as: Bool.self)
@@ -165,10 +171,10 @@ final class GhosttyApp {
             app_new(buf.baseAddress!, config)
         }
         guard app != nil else {
-            fputs("[GhosttyBridge] app_new FAILED\n", stderr)
+            cmuxLog("[GhosttyBridge] app_new FAILED")
             config_free(config); self.config = nil; return nil
         }
-        fputs("[GhosttyBridge] App created!\n", stderr)
+        cmuxLog("[GhosttyBridge] App created!")
     }
 
     deinit {
@@ -193,14 +199,14 @@ final class GhosttyApp {
             buf.storeBytes(of: Double(1.0), toByteOffset: 32, as: Double.self) // scale_factor
         }
 
-        fputs("[GhosttyBridge] Creating surface...\n", stderr)
+        cmuxLog("[GhosttyBridge] Creating surface...")
         surface = scfg.withUnsafeMutableBytes { buf in fn(app, buf.baseAddress!) }
 
         if surface != nil {
-            fputs("[GhosttyBridge] Surface created!\n", stderr)
+            cmuxLog("[GhosttyBridge] Surface created!")
             return true
         } else {
-            fputs("[GhosttyBridge] Surface creation failed\n", stderr)
+            cmuxLog("[GhosttyBridge] Surface creation failed")
             return false
         }
     }
