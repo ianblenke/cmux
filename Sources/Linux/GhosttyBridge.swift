@@ -82,6 +82,9 @@ final class GhosttyApp {
     private var fn_surface_refresh: (@convention(c) (UnsafeMutableRawPointer?) -> Void)?
     private var fn_surface_key: (@convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Bool)?
     private var fn_surface_text: (@convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UInt) -> Void)?
+    private var fn_surface_mouse_button: (@convention(c) (UnsafeMutableRawPointer?, Int32, Int32, Int32) -> Bool)?
+    private var fn_surface_mouse_pos: (@convention(c) (UnsafeMutableRawPointer?, Double, Double, Int32) -> Void)?
+    private var fn_surface_mouse_scroll: (@convention(c) (UnsafeMutableRawPointer?, Double, Double, Int32) -> Void)?
     private var fn_config_free: (@convention(c) (UnsafeMutableRawPointer?) -> Void)?
 
     init?() {
@@ -127,7 +130,10 @@ final class GhosttyApp {
               let surface_set_focus: @convention(c) (UnsafeMutableRawPointer?, Bool) -> Void = sym("ghostty_surface_set_focus"),
               let surface_set_scale: @convention(c) (UnsafeMutableRawPointer?, Double, Double) -> Void = sym("ghostty_surface_set_content_scale"),
               let surface_key: @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Bool = sym("ghostty_surface_key"),
-              let surface_text: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UInt) -> Void = sym("ghostty_surface_text")
+              let surface_text: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UInt) -> Void = sym("ghostty_surface_text"),
+              let surface_mouse_button: @convention(c) (UnsafeMutableRawPointer?, Int32, Int32, Int32) -> Bool = sym("ghostty_surface_mouse_button"),
+              let surface_mouse_pos: @convention(c) (UnsafeMutableRawPointer?, Double, Double, Int32) -> Void = sym("ghostty_surface_mouse_pos"),
+              let surface_mouse_scroll: @convention(c) (UnsafeMutableRawPointer?, Double, Double, Int32) -> Void = sym("ghostty_surface_mouse_scroll")
         else {
             cmuxLog("[GhosttyBridge] Symbol resolution failed")
             dlclose(h); handle = nil; return nil
@@ -145,6 +151,9 @@ final class GhosttyApp {
         self.fn_surface_set_content_scale = surface_set_scale
         self.fn_surface_key = surface_key
         self.fn_surface_text = surface_text
+        self.fn_surface_mouse_button = surface_mouse_button
+        self.fn_surface_mouse_pos = surface_mouse_pos
+        self.fn_surface_mouse_scroll = surface_mouse_scroll
 
         // Resolve C helper key functions (for correct ABI calling convention)
         cmux_ghostty_resolve_key_fns(h)
@@ -241,6 +250,30 @@ final class GhosttyApp {
             cmux_ghostty_surface_text(surface, cStr, text.utf8.count)
         }
     }
+
+    // MARK: - Mouse input
+
+    /// Mouse button press/release
+    /// state: 0=release, 1=press
+    /// button: 1=left, 2=right, 3=middle
+    func mouseButton(state: Int32, button: Int32, mods: Int32) -> Bool {
+        guard let surface = surface, let fn = fn_surface_mouse_button else { return false }
+        return fn(surface, state, button, mods)
+    }
+
+    /// Mouse position update
+    func mousePos(x: Double, y: Double, mods: Int32) {
+        guard let surface = surface, let fn = fn_surface_mouse_pos else { return }
+        fn(surface, x, y, mods)
+    }
+
+    /// Mouse scroll
+    func mouseScroll(dx: Double, dy: Double, mods: Int32) {
+        guard let surface = surface, let fn = fn_surface_mouse_scroll else { return }
+        fn(surface, dx, dy, mods)
+    }
+
+    // MARK: - Rendering
 
     func draw() {
         guard let surface = surface else { return }

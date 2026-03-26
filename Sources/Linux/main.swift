@@ -190,6 +190,68 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
         let addController: AddControllerFn = gtk_widget_add_controller
         addController(windowWidget, keyController)
         cmuxLog("[cmux] Keyboard input connected")
+
+        // Mouse motion
+        let motionController = gtk_event_controller_motion_new()!
+        let motionCb: @convention(c) (OpaquePointer?, Double, Double, gpointer?) -> Void = { _, x, y, _ in
+            ghosttyApp?.mousePos(x: x, y: y, mods: 0)
+        }
+        g_signal_connect_data(UnsafeMutableRawPointer(motionController), "motion",
+            unsafeBitCast(motionCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
+        let motionWidget = unsafeBitCast(win, to: UnsafeMutablePointer<GtkWidget>.self)
+        let addMotion: @convention(c) (UnsafeMutablePointer<GtkWidget>?, OpaquePointer?) -> Void = gtk_widget_add_controller
+        addMotion(motionWidget, motionController)
+
+        // Mouse click (press/release)
+        let clickGesture = gtk_gesture_click_new()!
+        gtk_gesture_single_set_button(unsafeBitCast(clickGesture, to: OpaquePointer.self), 0) // 0 = all buttons
+        let clickPressCb: @convention(c) (OpaquePointer?, Int32, Double, Double, gpointer?) -> Void = { gesture, nPress, x, y, _ in
+            guard let gApp = ghosttyApp else { return }
+            // Map GDK button number: 1=left, 2=middle, 3=right → ghostty: 1=left, 3=right, 2=middle
+            let gdkButton = gtk_gesture_single_get_current_button(unsafeBitCast(gesture, to: OpaquePointer.self))
+            let ghosttyButton: Int32 = switch Int32(gdkButton) {
+                case 1: 1   // GHOSTTY_MOUSE_LEFT
+                case 2: 3   // GHOSTTY_MOUSE_MIDDLE
+                case 3: 2   // GHOSTTY_MOUSE_RIGHT
+                default: Int32(gdkButton)
+            }
+            gApp.mousePos(x: x, y: y, mods: 0)
+            _ = gApp.mouseButton(state: 1, button: ghosttyButton, mods: 0)  // press
+        }
+        g_signal_connect_data(UnsafeMutableRawPointer(clickGesture), "pressed",
+            unsafeBitCast(clickPressCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
+
+        let clickReleaseCb: @convention(c) (OpaquePointer?, Int32, Double, Double, gpointer?) -> Void = { gesture, nPress, x, y, _ in
+            guard let gApp = ghosttyApp else { return }
+            let gdkButton = gtk_gesture_single_get_current_button(unsafeBitCast(gesture, to: OpaquePointer.self))
+            let ghosttyButton: Int32 = switch Int32(gdkButton) {
+                case 1: 1; case 2: 3; case 3: 2; default: Int32(gdkButton)
+            }
+            _ = gApp.mouseButton(state: 0, button: ghosttyButton, mods: 0)  // release
+        }
+        g_signal_connect_data(UnsafeMutableRawPointer(clickGesture), "released",
+            unsafeBitCast(clickReleaseCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
+
+        let clickWidget = unsafeBitCast(win, to: UnsafeMutablePointer<GtkWidget>.self)
+        let addClick: @convention(c) (UnsafeMutablePointer<GtkWidget>?, OpaquePointer?) -> Void = gtk_widget_add_controller
+        addClick(clickWidget, unsafeBitCast(clickGesture, to: OpaquePointer.self))
+
+        // Mouse scroll
+        let scrollController = gtk_event_controller_scroll_new(
+            GtkEventControllerScrollFlags(rawValue:
+                GTK_EVENT_CONTROLLER_SCROLL_VERTICAL.rawValue |
+                GTK_EVENT_CONTROLLER_SCROLL_HORIZONTAL.rawValue))!
+        let scrollCb: @convention(c) (OpaquePointer?, Double, Double, gpointer?) -> gboolean = { _, dx, dy, _ in
+            ghosttyApp?.mouseScroll(dx: dx, dy: dy, mods: 0)
+            return 1
+        }
+        g_signal_connect_data(UnsafeMutableRawPointer(scrollController), "scroll",
+            unsafeBitCast(scrollCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
+        let scrollWidget = unsafeBitCast(win, to: UnsafeMutablePointer<GtkWidget>.self)
+        let addScroll: @convention(c) (UnsafeMutablePointer<GtkWidget>?, OpaquePointer?) -> Void = gtk_widget_add_controller
+        addScroll(scrollWidget, scrollController)
+
+        cmuxLog("[cmux] Mouse input connected")
     }
 
     gtk_window_present(win)
