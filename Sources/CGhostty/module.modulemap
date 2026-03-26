@@ -1,0 +1,4 @@
+module CGhostty [system] {
+    header "ghostty_wrapper.h"
+    export *
+}
