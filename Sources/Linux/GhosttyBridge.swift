@@ -24,27 +24,16 @@ private let wakeupCb: @convention(c) (UnsafeMutableRawPointer?) -> Void = { _ in
     g_idle_add({ _ -> gboolean in 0 }, nil)
 }
 
-// The action callback receives structs by value via the C ABI.
-// ghostty_target_s = 16 bytes, ghostty_action_s = 32 bytes.
-// On x86_64 SysV ABI, the 16-byte target may be in registers,
-// and the 32-byte action is passed via hidden pointer.
-// We use UnsafeRawPointer for the struct params.
+// The action callback. ghostty_target_s (16 bytes) and ghostty_action_s (32 bytes)
+// are passed by value in the C ABI. We can't easily destructure them from Swift
+// with dlopen, so we accept the raw bytes and return false for now.
+// The render action will be handled via ghostty_surface_draw() from the
+// GtkGLArea render signal instead.
 private let actionCb: @convention(c) (
     UnsafeMutableRawPointer?,  // ghostty_app_t
-    UnsafeMutableRawPointer?,  // ghostty_target_s (by value — pointer in some ABIs)
-    UnsafeMutableRawPointer?   // ghostty_action_s (by value — pointer in some ABIs)
-) -> Bool = { _, _, actionPtr in
-    // The action tag is at offset 0 (int32)
-    guard let actionPtr = actionPtr else { return false }
-    let tag = actionPtr.load(as: Int32.self)
-
-    if tag == GHOSTTY_ACTION_RENDER {
-        // Queue a GL render on the GtkGLArea
-        if let glArea = globalGLArea {
-            gtk_gl_area_queue_render(glArea)
-        }
-        return true
-    }
+    UnsafeMutableRawPointer?,  // ghostty_target_s (by-value, passed as pointer on x86_64)
+    UnsafeMutableRawPointer?   // ghostty_action_s (by-value, passed as pointer on x86_64)
+) -> Bool = { _, _, _ in
     return false
 }
 
@@ -87,9 +76,12 @@ final class GhosttyApp {
     private var fn_config_free: (@convention(c) (UnsafeMutableRawPointer?) -> Void)?
 
     init?() {
+        // Resolve library path relative to the executable
+        let execDir = ProcessInfo.processInfo.arguments[0]
+            .split(separator: "/").dropLast().joined(separator: "/")
         let paths = [
+            "/home/ianblenke/github.com/ianblenke/cmux/ghostty/zig-out/lib/libghostty.so",
             "ghostty/zig-out/lib/libghostty.so",
-            "./ghostty/zig-out/lib/libghostty.so",
             "libghostty.so",
         ]
         for path in paths {
