@@ -44,10 +44,18 @@ let package = Package(
             path: "Sources/Core"
         ),
 
+        // C helpers for ghostty ABI-correct function calls
+        .target(
+            name: "CGhosttyHelpers",
+            path: "Sources/CGhosttyHelpers",
+            publicHeadersPath: "include",
+            linkerSettings: [.linkedLibrary("dl")]
+        ),
+
         // Linux GTK4 application
         .executableTarget(
             name: "cmux-linux",
-            dependencies: ["cmux-pal", "cmux-core", "CGtk4"],
+            dependencies: ["cmux-pal", "cmux-core", "CGtk4", "CGhosttyHelpers"],
             path: "Sources/Linux",
             linkerSettings: [
                 .linkedLibrary("gtk-4"),

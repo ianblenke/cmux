@@ -4,6 +4,7 @@
 
 import Foundation
 import CGtk4
+import CGhosttyHelpers
 #if canImport(Glibc)
 import Glibc
 #endif
@@ -145,6 +146,9 @@ final class GhosttyApp {
         self.fn_surface_key = surface_key
         self.fn_surface_text = surface_text
 
+        // Resolve C helper key functions (for correct ABI calling convention)
+        cmux_ghostty_resolve_key_fns(h)
+
         // Step 1: ghostty_init
         cmuxLog("[GhosttyBridge] ghostty_init...")
         let initResult = ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv)
@@ -217,55 +221,24 @@ final class GhosttyApp {
         }
     }
 
-    /// Send a key event to the ghostty surface.
-    /// keycode: hardware evdev scancode (from GTK EventControllerKey)
-    /// text: UTF-8 text produced by the key (from gdk_keyval_to_unicode)
-    /// mods: ghostty modifier flags
-    /// action: 0=release, 1=press, 2=repeat
+    /// Send a key event to the ghostty surface via C helper (correct ABI).
     func sendKey(keycode: UInt32, text: String?, mods: Int32, action: Int32) -> Bool {
-        guard let surface = surface, let fn = fn_surface_key else { return false }
-
-        // Build ghostty_input_key_s (32 bytes)
-        var keyBuf = [UInt8](repeating: 0, count: 32)
-        var result = false
+        guard let surface = surface else { return false }
 
         if let text = text, !text.isEmpty {
-            text.withCString { cStr in
-                keyBuf.withUnsafeMutableBytes { buf in
-                    buf.storeBytes(of: action, toByteOffset: 0, as: Int32.self)       // action
-                    buf.storeBytes(of: mods, toByteOffset: 4, as: Int32.self)          // mods
-                    buf.storeBytes(of: Int32(0), toByteOffset: 8, as: Int32.self)      // consumed_mods
-                    buf.storeBytes(of: keycode, toByteOffset: 12, as: UInt32.self)     // keycode
-                    buf.storeBytes(of: cStr, toByteOffset: 16, as: UnsafePointer<CChar>.self)  // text
-                    buf.storeBytes(of: UInt32(0), toByteOffset: 24, as: UInt32.self)   // unshifted_codepoint
-                    buf.storeBytes(of: false, toByteOffset: 28, as: Bool.self)         // composing
-                }
-                result = keyBuf.withUnsafeMutableBytes { buf in
-                    fn(surface, buf.baseAddress!)
-                }
+            return text.withCString { cStr in
+                cmux_ghostty_surface_key(surface, action, mods, 0, keycode, cStr, 0, false)
             }
         } else {
-            keyBuf.withUnsafeMutableBytes { buf in
-                buf.storeBytes(of: action, toByteOffset: 0, as: Int32.self)
-                buf.storeBytes(of: mods, toByteOffset: 4, as: Int32.self)
-                buf.storeBytes(of: Int32(0), toByteOffset: 8, as: Int32.self)
-                buf.storeBytes(of: keycode, toByteOffset: 12, as: UInt32.self)
-                // text pointer remains null (0)
-                buf.storeBytes(of: UInt32(0), toByteOffset: 24, as: UInt32.self)
-                buf.storeBytes(of: false, toByteOffset: 28, as: Bool.self)
-            }
-            result = keyBuf.withUnsafeMutableBytes { buf in
-                fn(surface, buf.baseAddress!)
-            }
+            return cmux_ghostty_surface_key(surface, action, mods, 0, keycode, nil, 0, false)
         }
-        return result
     }
 
     /// Send raw text input to the surface (for IME).
     func sendText(_ text: String) {
-        guard let surface = surface, let fn = fn_surface_text else { return }
+        guard let surface = surface else { return }
         text.withCString { cStr in
-            fn(surface, cStr, UInt(text.utf8.count))
+            cmux_ghostty_surface_text(surface, cStr, text.utf8.count)
         }
     }
 
