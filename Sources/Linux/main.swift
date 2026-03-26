@@ -55,8 +55,9 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
         gtk_gl_area_set_auto_render(glAreaPtr, 1)
 
         // Render callback
-        let renderCb: @convention(c) (UnsafeMutablePointer<GtkGLArea>?, OpaquePointer?, gpointer?) -> gboolean = { _, _, _ in
-            // ghosttyApp?.draw()  // Disabled — crashes during render
+        let renderCb: @convention(c) (UnsafeMutablePointer<GtkGLArea>?, OpaquePointer?, gpointer?) -> gboolean = { glArea, ctx, _ in
+            // Draw the ghostty surface — GL context is current here
+            ghosttyApp?.draw()
             return 1
         }
         g_signal_connect_data(glArea, "render",
@@ -68,11 +69,11 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
             let glPtr = unsafeBitCast(widget, to: UnsafeMutablePointer<GtkGLArea>.self)
             gtk_gl_area_make_current(glPtr)
 
-            fputs("[cmux] GL area realized, creating surface...\n", stderr)
-            let ok = gApp.createSurface(
-                glArea: UnsafeMutableRawPointer(glPtr),
-                widget: UnsafeMutableRawPointer(widget)
-            )
+            // Make GL context current BEFORE creating surface —
+            // the OpenGL renderer needs it during initialization
+            gtk_gl_area_make_current(glPtr)
+            fputs("[cmux] GL context current, creating surface...\n", stderr)
+            let ok = gApp.createSurface(glArea: glPtr, widget: widget)
             if ok {
                 let w = gtk_widget_get_width(widget)
                 let h = gtk_widget_get_height(widget)
@@ -97,9 +98,8 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
 
         gtk_box_append(contentBox, glArea)
 
-        // Tick timer disabled — surface crashes during render
-        // g_timeout_add(16, { _ -> gboolean in ghosttyApp?.tick(); return 1 }, nil)
-        fputs("[cmux] Tick/render disabled for debugging\n", stderr)
+        // Tick timer — process ghostty events on main thread
+        g_timeout_add(16, { _ -> gboolean in ghosttyApp?.tick(); return 1 }, nil)
     } else {
         let label = gtk_label_new("cmux — Ghostty failed to load\nRunning in stub mode")
         gtk_widget_set_halign(label, GTK_ALIGN_CENTER)
