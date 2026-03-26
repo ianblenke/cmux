@@ -90,8 +90,17 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
             unsafeBitCast(realizeCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
 
         // Resize callback
-        let resizeCb: @convention(c) (UnsafeMutablePointer<GtkGLArea>?, Int32, Int32, gpointer?) -> Void = { _, w, h, _ in
-            if w > 0 && h > 0 { ghosttyApp?.setSize(UInt32(w), UInt32(h)) }
+        let resizeCb: @convention(c) (UnsafeMutablePointer<GtkGLArea>?, Int32, Int32, gpointer?) -> Void = { glArea, w, h, _ in
+            if let gApp = ghosttyApp, w > 0, h > 0 {
+                gApp.setSize(UInt32(w), UInt32(h))
+                // Update content scale on resize too
+                if let glArea = glArea {
+                    let widget = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
+                    let scale = Double(gtk_widget_get_scale_factor(widget))
+                    gApp.setContentScale(scale, scale)
+                }
+                cmuxLog("[cmux] Resized: \(w)x\(h)")
+            }
         }
         g_signal_connect_data(glArea, "resize",
             unsafeBitCast(resizeCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
@@ -136,7 +145,9 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
                 }
             }
 
-            return gApp.sendKey(keycode: keycode, text: text, mods: mods, action: 1) ? 1 : 0
+            let handled = gApp.sendKey(keycode: keycode, text: text, mods: mods, action: 1)
+            cmuxLog("[key] press keycode=\(keycode) keyval=\(keyval) text=\(text ?? "nil") handled=\(handled)")
+            return handled ? 1 : 0
         }
         g_signal_connect_data(UnsafeMutableRawPointer(keyController), "key-pressed",
             unsafeBitCast(keyPressCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
