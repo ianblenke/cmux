@@ -43,17 +43,43 @@ private let actionCb: @convention(c) (
     return false
 }
 
+// Read clipboard: ghostty wants to paste. We need to read from GDK clipboard
+// and call ghostty_surface_complete_clipboard_request with the result.
+// For now, complete with empty string — full async clipboard requires more plumbing.
 private let readClipboardCb: @convention(c) (
     UnsafeMutableRawPointer?, Int32, UnsafeMutableRawPointer?
-) -> Void = { _, _, _ in }
+) -> Void = { userdata, clipboardType, request in
+    // TODO: Implement async GDK clipboard read
+    // For now ghostty will handle paste through key bindings
+}
 
 private let confirmReadClipboardCb: @convention(c) (
     UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UnsafeMutableRawPointer?, Int32
-) -> Void = { _, _, _, _ in }
+) -> Void = { _, _, _, _ in
+    // Auto-approve clipboard reads
+}
 
+// Write clipboard: ghostty wants to copy text (e.g., terminal selection)
 private let writeClipboardCb: @convention(c) (
     UnsafeMutableRawPointer?, Int32, UnsafeMutableRawPointer?, Int, Bool
-) -> Void = { _, _, _, _, _ in }
+) -> Void = { _, clipboardType, contentPtr, count, confirmed in
+    guard let contentPtr = contentPtr, count > 0 else { return }
+
+    // ghostty_clipboard_content_s is { const char* mime; const char* data; }
+    // Each entry is 16 bytes (two pointers)
+    let content = contentPtr.assumingMemoryBound(to: (UnsafePointer<CChar>?, UnsafePointer<CChar>?).self)
+
+    // Use the first content entry's data
+    if let dataPtr = content.pointee.1 {
+        let text = String(cString: dataPtr)
+        // Write to GDK clipboard
+        if let display = gdk_display_get_default() {
+            let clipboard = gdk_display_get_clipboard(display)
+            gdk_clipboard_set_text(clipboard, text)
+            cmuxLog("[clipboard] Copied \(text.count) chars")
+        }
+    }
+}
 
 private let closeSurfaceCb: @convention(c) (
     UnsafeMutableRawPointer?, Bool

@@ -51,6 +51,8 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
         guard let glArea = gtk_gl_area_new() else { return }
         gtk_widget_set_hexpand(glArea, 1)
         gtk_widget_set_vexpand(glArea, 1)
+        gtk_widget_set_focusable(glArea, 1)  // Allow GL area to receive keyboard focus
+        gtk_widget_set_can_focus(glArea, 1)
         let glAreaPtr = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkGLArea>.self)
         gtk_gl_area_set_auto_render(glAreaPtr, 1)
 
@@ -83,6 +85,8 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
                 gApp.setFocus(true)
                 let scale = Double(gtk_widget_get_scale_factor(widget))
                 gApp.setContentScale(scale, scale)
+                // Grab focus so keyboard goes to terminal
+                _ = gtk_widget_grab_focus(widget)
                 cmuxLog("[cmux] Surface ready: \(w)x\(h) @\(scale)x")
             }
         }
@@ -217,6 +221,11 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
             }
             gApp.mousePos(x: x, y: y, mods: 0)
             _ = gApp.mouseButton(state: 1, button: ghosttyButton, mods: 0)  // press
+            // Grab keyboard focus on click
+            if let glArea = globalGLArea {
+                let w = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
+                _ = gtk_widget_grab_focus(w)
+            }
         }
         g_signal_connect_data(UnsafeMutableRawPointer(clickGesture), "pressed",
             unsafeBitCast(clickPressCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
