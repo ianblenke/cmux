@@ -4,46 +4,61 @@
 
 ## What's Working
 
-### macOS Application
-- Full terminal rendering via libghostty
-- Workspace management with vertical sidebar tabs
-- Horizontal and vertical split panes (Bonsplit)
-- In-app browser with scriptable API (agent-browser port)
-- Notification system (OSC 9/99/777, CLI notifications)
-- Session persistence (layout, directories, scrollback, browser URLs)
-- Socket control API (v1 text + v2 JSON-RPC)
-- CLI automation
-- Sparkle auto-updates (stable + nightly channels)
-- Configuration from Ghostty config files
-- Keyboard shortcuts (customizable)
-- Search/find in terminal and browser
-- Remote SSH with daemon, reconnect, browser proxying
-- AppleScript integration
-- Port scanning for sidebar display
-- PostHog analytics + Sentry error reporting
-- Localization (English, Japanese)
+### Linux Application (NEW — built this session)
+- GTK4 window with sidebar + terminal on Wayland
+- libghostty terminal rendering via OpenGL 4.6 in GtkGLArea
+- Keyboard input with GDK→evdev keycode mapping
+- Command execution with colored output
+- Ctrl+C/D/Z signal handling
+- Mouse motion, click, scroll
+- Clipboard copy (Ctrl+Shift+C) via GDK
+- Multiple workspaces (Ctrl+T new, Ctrl+W close, Ctrl+1-9 switch)
+- Sidebar with dynamic workspace list and active indicator
+- HiDPI support (2x scale)
+- Terminal resize with window
+- Focus management (click-to-focus, auto-focus on create)
+- 60fps event processing tick loop
 
-### Remote Daemon (Cross-Platform)
-- Go daemon runs on Linux and macOS
-- Cross-compiled for darwin/linux × arm64/amd64
-- CLI relay with argv[0] detection
-- SHA-256 artifact trust
+### Cross-Platform Infrastructure
+- Platform Abstraction Layer (15 protocol files, compiles on Linux)
+- Core modules (session persistence, config, types — compiles on Linux)
+- OpenSpec coverage: 355 REQs, 219 scenarios across 21 capabilities
+- BMAD strategic docs (PRD, architecture, traceability)
+
+### Ghostty Fork (ianblenke/ghostty, branch: linux-embedded-platform)
+- GHOSTTY_PLATFORM_LINUX in embedded API
+- Conditional objc import for Linux
+- must_draw_from_app_thread for OpenGL on Linux
+- GLAD bundled in shared library
+- OpenGL surfaceInit for embedded Linux
+
+### macOS Application (existing, unchanged)
+- Full terminal rendering via libghostty
+- All existing features preserved
+- Build system unchanged (Xcode project)
 
 ## What's Next
 
-### Cross-Platform (Linux) Port
-- Define Platform Abstraction Layer (PAL)
-- Evaluate GTK4 Swift bindings or alternative Linux UI
-- Port terminal rendering (libghostty already supports Linux)
-- Port or replace Bonsplit for Linux
-- Replace WKWebView with WebKitGTK
-- Linux build system (SPM/CMake)
-- Linux distribution packaging (AppImage, Flatpak)
+### Linux — Short Term
+1. Proper paste (Ctrl+Shift+V via async GDK clipboard read)
+2. Workspace titles from shell CWD/process name
+3. Split panes within workspaces
+4. Ghostty config file reading (themes, fonts, colors)
+5. Build script improvements (auto-detect Package.swift swap)
 
-### Spec Backfill (In Progress)
-- OpenSpec capability specifications being written for all 21 capabilities
-- BMAD strategic documents created
-- Traceability matrix to be completed after specs
+### Linux — Medium Term
+1. Socket control API (cmux CLI)
+2. Session persistence (save/restore layout)
+3. Notification system (OSC 9/99/777)
+4. Browser panels (WebKitGTK)
+5. Linux packaging (AppImage, Flatpak)
+
+### Cross-Platform
+1. Continue PAL Core extraction (config parsing, tab manager)
+2. macOS backend wrappers for PAL protocols
+3. Shared build system (single Package.swift with conditional compilation)
 
 ## Known Blockers
-- None currently
+- Package.swift must be manually swapped for Linux builds (`cp Package.linux.swift Package.swift`)
+- libghostty.so loaded via dlopen (not compile-time linked) due to Zig global init
+- ghostty fork changes not yet merged to main branch
