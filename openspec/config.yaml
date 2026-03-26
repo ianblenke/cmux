@@ -1,0 +1,51 @@
+schema: spec-driven
+
+context: |
+  # cmux — Cross-Platform Ghostty-Based Terminal
+
+  ## Tech Stack
+  - **App layer**: Swift + SwiftUI + AppKit (macOS), GTK4 (Linux planned)
+  - **Terminal engine**: libghostty (Zig), GPU-accelerated rendering
+  - **Tab/pane UI**: Bonsplit (vendored Swift library)
+  - **Browser**: WKWebView (macOS), WebKitGTK (Linux planned)
+  - **CLI**: Swift monolithic CLI (514KB) communicating via Unix socket
+  - **Remote daemon**: Go (cmuxd-remote)
+  - **Package management**: Swift Package Manager, NPM/Bun
+  - **Testing**: XCTest (unit), XCUITest (UI automation), Python socket tests
+  - **CI/CD**: GitHub Actions
+  - **Update system**: Sparkle (macOS), platform-native (Linux planned)
+  - **Localization**: XCStrings (English, Japanese, 19 README translations)
+
+  ## Conventions
+  - Spec-anchored development: OpenSpec requirement -> test -> implementation -> verification -> reconciliation
+  - All user-facing strings must be localized
+  - Cross-platform: macOS primary, Linux secondary, other Ghostty platforms future
+  - Platform abstraction layer (PAL) pattern for OS-specific code
+  - REQ-* and SCENARIO-* identifiers in all specs and test comments
+  - BDD Given/When/Then format for scenarios
+
+  ## Domain Knowledge
+  - cmux is a terminal multiplexer and notification hub for AI coding agents
+  - Key differentiator: notification rings, vertical tabs with metadata, scriptable browser
+  - "Zen of cmux": composable primitives, not prescriptive workflows
+  - Socket API supports both v1 (text) and v2 (JSON-RPC) protocols
+  - Workspaces contain panes; panes contain surfaces (terminal or browser)
+
+rules:
+  proposal:
+    - Include cross-platform impact analysis (macOS/Linux/future platforms)
+    - Reference affected REQ-* and SCENARIO-* identifiers
+    - Include a "Platform Abstraction" section if the change touches OS-specific code
+  spec:
+    - Every REQ-* must specify platform applicability (all, macOS-only, Linux-only)
+    - Every SCENARIO-* must use Given/When/Then BDD format
+    - Mark extracted specs with "Status: EXTRACTED" until verified
+    - Include "Cross-Platform Notes" section in each capability spec
+  design:
+    - Document platform abstraction boundaries explicitly
+    - Reference ADRs for architectural decisions
+    - Include sequence diagrams for inter-component communication
+  tasks:
+    - Break tasks into chunks of max 2 hours
+    - Each task must reference the story and REQ-* it implements
+    - Include platform-specific subtasks when PAL changes are needed
