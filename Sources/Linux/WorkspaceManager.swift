@@ -5,12 +5,14 @@
 import Foundation
 import CGtk4
 
-/// A single workspace containing a ghostty terminal surface
+/// A single workspace containing one or more terminal panes
 struct Workspace {
     let id: Int
     var title: String
-    var surface: UnsafeMutableRawPointer?  // ghostty_surface_t
+    var surface: UnsafeMutableRawPointer?  // primary surface (first pane)
     var cwd: String
+    var rootPane: PaneNode?  // pane tree (nil = single surface, old style)
+    var contentWidget: UnsafeMutablePointer<GtkWidget>?  // current widget in content area
 
     init(id: Int, title: String? = nil, cwd: String = "~") {
         self.id = id
@@ -47,7 +49,9 @@ final class WorkspaceManager {
         // Create ghostty surface for this workspace
         if ghosttyApp.createSurface(glArea: glArea, widget: widget) {
             ws.surface = ghosttyApp.surface
-            // Reset the global surface reference — we manage it ourselves
+            ws.contentWidget = widget  // Track the GL area widget
+            // Register in pane manager for surface lookup
+            paneManager.registerSurface(glArea: glArea, surface: ghosttyApp.surface!)
         }
 
         workspaces.append(ws)
@@ -142,6 +146,60 @@ final class WorkspaceManager {
         }
     }
 
+    /// Split the active pane in the current workspace
+    func splitActivePane(orientation: PaneSplit.SplitOrientation) {
+        guard activeIndex >= 0, activeIndex < workspaces.count else { return }
+        guard let gApp = ghosttyApp else { return }
+        guard let contentBox = contentBoxWidget else { return }
+
+        let ws = workspaces[activeIndex]
+
+        // Create new pane
+        guard let newPane = createTerminalPane(ghosttyApp: gApp) else {
+            cmuxLog("[split] Failed to create new pane")
+            return
+        }
+
+        if let currentRoot = ws.rootPane {
+            // Already has a pane tree — wrap current root + new pane in a split
+            let split = PaneSplit(orientation: orientation, first: currentRoot, second: .leaf(newPane))
+            workspaces[activeIndex].rootPane = .split(split)
+        } else if let currentWidget = ws.contentWidget {
+            // First split — wrap the existing GL area in a pane leaf + new pane
+            let existingLeaf = PaneLeaf(id: 0)
+            existingLeaf.widget = currentWidget
+            existingLeaf.glArea = unsafeBitCast(currentWidget, to: UnsafeMutablePointer<GtkGLArea>.self)
+            existingLeaf.surface = ws.surface
+
+            let split = PaneSplit(orientation: orientation, first: .leaf(existingLeaf), second: .leaf(newPane))
+            workspaces[activeIndex].rootPane = .split(split)
+        } else {
+            cmuxLog("[split] No content to split")
+            return
+        }
+
+        // Rebuild the widget tree
+        if let oldWidget = ws.contentWidget {
+            // Remove old widget from parent
+            let parent = gtk_widget_get_parent(oldWidget)
+            if let parent = parent {
+                let parentBox = unsafeBitCast(parent, to: UnsafeMutablePointer<GtkBox>.self)
+                gtk_box_remove(parentBox, oldWidget)
+            }
+        }
+
+        // Build new widget tree from pane structure
+        if let newWidget = buildPaneWidget(workspaces[activeIndex].rootPane!) {
+            gtk_box_append(contentBox, newWidget)
+            workspaces[activeIndex].contentWidget = newWidget
+        }
+
+        cmuxLog("[split] Split \(orientation == .horizontal ? "horizontal" : "vertical"), panes in workspace \(workspaces[activeIndex].id)")
+    }
+
+    /// The content area box widget (set by main.swift)
+    var contentBoxWidget: UnsafeMutablePointer<GtkBox>?
+
     /// Close the active workspace
     func closeActive() {
         guard workspaces.count > 1 else {
@@ -217,11 +275,8 @@ final class WorkspaceManager {
             let displayText = ws.title
             let label = gtk_label_new("\(prefix)\(displayText)")
             gtk_widget_set_halign(label, GTK_ALIGN_START)
-            gtk_label_set_ellipsize(
-                unsafeBitCast(label, to: UnsafeMutablePointer<GtkLabel>.self),
-                PANGO_ELLIPSIZE_MIDDLE)
-            gtk_label_set_max_width_chars(
-                unsafeBitCast(label, to: UnsafeMutablePointer<GtkLabel>.self), 25)
+            // Ellipsize handled by truncating in Swift
+
 
             // Make clickable
             let clickGesture = gtk_gesture_click_new()!

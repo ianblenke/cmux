@@ -48,6 +48,8 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
     gtk_widget_set_vexpand(content, 1)
     let contentBox = unsafeBitCast(content, to: UnsafeMutablePointer<GtkBox>.self)
 
+    workspaceManager.contentBoxWidget = contentBox
+
     if let gApp = ghosttyApp {
         // GtkGLArea for terminal rendering
         guard let glArea = gtk_gl_area_new() else { return }
@@ -161,6 +163,12 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
                     if let surface = workspaceManager.activeSurface {
                         cmux_ghostty_paste_from_clipboard(surface)
                     }
+                    return 1
+                }
+                // Ctrl+D / Ctrl+Shift+D: split pane
+                if keyval == UInt32(GDK_KEY_d) || keyval == UInt32(GDK_KEY_D) {
+                    let orientation: PaneSplit.SplitOrientation = isShift ? .vertical : .horizontal
+                    workspaceManager.splitActivePane(orientation: orientation)
                     return 1
                 }
                 // Ctrl+W: close current workspace
