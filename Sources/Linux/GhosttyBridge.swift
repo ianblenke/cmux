@@ -321,6 +321,16 @@ final class GhosttyApp {
         fn_surface_set_focus?(surface, focused)
     }
 
+    /// Set focus on a specific surface (for workspace switching)
+    func setFocusOnSurface(_ surface: UnsafeMutableRawPointer, focused: Bool) {
+        fn_surface_set_focus?(surface, focused)
+    }
+
+    /// Draw a specific surface (for workspace switching)
+    func drawSurface(_ surface: UnsafeMutableRawPointer) {
+        fn_surface_draw?(surface)
+    }
+
     func setContentScale(_ x: Double, _ y: Double) {
         guard let surface = surface else { return }
         fn_surface_set_content_scale?(surface, x, y)

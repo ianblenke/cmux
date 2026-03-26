@@ -35,8 +35,8 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
     guard let sidebar = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4) else { return }
     gtk_widget_set_size_request(sidebar, 220, -1)
     let sidebarBox = unsafeBitCast(sidebar, to: UnsafeMutablePointer<GtkBox>.self)
+    workspaceManager.sidebarBox = sidebarBox
     gtk_box_append(sidebarBox, gtk_label_new("Workspaces"))
-    gtk_box_append(sidebarBox, gtk_label_new("  1: ~/project"))
     gtk_box_append(hboxPtr, sidebar)
     gtk_box_append(hboxPtr, gtk_separator_new(GTK_ORIENTATION_VERTICAL))
 
@@ -56,10 +56,11 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
         let glAreaPtr = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkGLArea>.self)
         gtk_gl_area_set_auto_render(glAreaPtr, 1)
 
-        // Render callback
+        // Render callback — draw the ACTIVE workspace's surface
         let renderCb: @convention(c) (UnsafeMutablePointer<GtkGLArea>?, OpaquePointer?, gpointer?) -> gboolean = { glArea, ctx, _ in
-            // Draw the ghostty surface — GL context is current here
-            ghosttyApp?.draw()
+            if let surface = workspaceManager.activeSurface, let gApp = ghosttyApp {
+                gApp.drawSurface(surface)
+            }
             return 1
         }
         g_signal_connect_data(glArea, "render",
@@ -74,9 +75,11 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
             // Make GL context current BEFORE creating surface —
             // the OpenGL renderer needs it during initialization
             gtk_gl_area_make_current(glPtr)
-            cmuxLog("[cmux] GL context current, creating surface...")
-            let ok = gApp.createSurface(glArea: glPtr, widget: widget)
-            if ok {
+            cmuxLog("[cmux] GL context current, creating initial workspace...")
+            workspaceManager.glArea = glPtr
+            let wsId = workspaceManager.createWorkspace(
+                ghosttyApp: gApp, glArea: glPtr, widget: widget)
+            if wsId > 0 {
                 let w = gtk_widget_get_width(widget)
                 let h = gtk_widget_get_height(widget)
                 if w > 0 && h > 0 {
@@ -85,9 +88,8 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
                 gApp.setFocus(true)
                 let scale = Double(gtk_widget_get_scale_factor(widget))
                 gApp.setContentScale(scale, scale)
-                // Grab focus so keyboard goes to terminal
                 _ = gtk_widget_grab_focus(widget)
-                cmuxLog("[cmux] Surface ready: \(w)x\(h) @\(scale)x")
+                cmuxLog("[cmux] Workspace \(wsId) ready: \(w)x\(h) @\(scale)x")
             }
         }
         g_signal_connect_data(glArea, "realize",
@@ -138,6 +140,40 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
             if state & UInt32(GDK_CONTROL_MASK.rawValue) != 0 { mods |= 2 }   // GHOSTTY_MODS_CTRL
             if state & UInt32(GDK_ALT_MASK.rawValue) != 0 { mods |= 4 }       // GHOSTTY_MODS_ALT
             if state & UInt32(GDK_SUPER_MASK.rawValue) != 0 { mods |= 8 }     // GHOSTTY_MODS_SUPER
+
+            // Handle cmux keybindings before sending to ghostty
+            let isCtrl = mods & 2 != 0
+            let isSuper = mods & 8 != 0
+            let isMeta = isCtrl || isSuper  // Use Ctrl or Super for cmux bindings
+
+            if isMeta {
+                // Ctrl+T or Super+T: new workspace
+                if keyval == UInt32(GDK_KEY_t) || keyval == UInt32(GDK_KEY_T) {
+                    if let gl = workspaceManager.glArea {
+                        let w = unsafeBitCast(gl, to: UnsafeMutablePointer<GtkWidget>.self)
+                        gtk_gl_area_make_current(gl)
+                        _ = workspaceManager.createWorkspace(
+                            ghosttyApp: gApp, glArea: gl, widget: w)
+                    }
+                    return 1
+                }
+                // Ctrl+1-9: switch workspace
+                if keyval >= UInt32(GDK_KEY_1) && keyval <= UInt32(GDK_KEY_9) {
+                    let idx = Int(keyval - UInt32(GDK_KEY_1))
+                    workspaceManager.switchTo(index: idx)
+                    return 1
+                }
+                // Ctrl+]: next workspace
+                if keyval == UInt32(GDK_KEY_bracketright) {
+                    workspaceManager.next()
+                    return 1
+                }
+                // Ctrl+[: previous workspace
+                if keyval == UInt32(GDK_KEY_bracketleft) {
+                    workspaceManager.previous()
+                    return 1
+                }
+            }
 
             // Use hardware keycode if valid, otherwise map from keyval
             let evdevKeycode: UInt32
