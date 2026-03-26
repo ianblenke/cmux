@@ -113,7 +113,16 @@ final class WorkspaceManager {
         var changed = false
 
         if let title = pendingTitle {
-            workspaces[activeIndex].title = "\(workspaces[activeIndex].id): \(title)"
+            // Extract just the path portion from "user@host:path" format
+            let displayTitle: String
+            if let colonIdx = title.lastIndex(of: ":") {
+                let path = String(title[title.index(after: colonIdx)...])
+                let home = ProcessInfo.processInfo.environment["HOME"] ?? ""
+                displayTitle = path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
+            } else {
+                displayTitle = title
+            }
+            workspaces[activeIndex].title = "\(workspaces[activeIndex].id): \(displayTitle)"
             pendingTitle = nil
             changed = true
         }
@@ -204,8 +213,15 @@ final class WorkspaceManager {
         // Add workspace entries
         for (i, ws) in workspaces.enumerated() {
             let prefix = i == activeIndex ? "▸ " : "  "
-            let label = gtk_label_new("\(prefix)\(ws.id): \(ws.cwd)")
+            // Show the workspace title (extracted CWD path)
+            let displayText = ws.title
+            let label = gtk_label_new("\(prefix)\(displayText)")
             gtk_widget_set_halign(label, GTK_ALIGN_START)
+            gtk_label_set_ellipsize(
+                unsafeBitCast(label, to: UnsafeMutablePointer<GtkLabel>.self),
+                PANGO_ELLIPSIZE_MIDDLE)
+            gtk_label_set_max_width_chars(
+                unsafeBitCast(label, to: UnsafeMutablePointer<GtkLabel>.self), 25)
 
             // Make clickable
             let clickGesture = gtk_gesture_click_new()!
