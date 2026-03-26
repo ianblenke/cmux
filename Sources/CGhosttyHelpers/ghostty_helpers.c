@@ -72,6 +72,32 @@ void cmux_ghostty_surface_text(
     g_surface_text(surface, text, len);
 }
 
+// Paste support — read GDK clipboard and send to ghostty surface
+#include <gtk/gtk.h>
+
+static ghostty_surface_text_fn g_paste_text_fn = NULL;
+static void* g_paste_surface = NULL;
+
+static void clipboard_text_received(GObject *source, GAsyncResult *result, gpointer user_data) {
+    GdkClipboard *clipboard = GDK_CLIPBOARD(source);
+    char *text = gdk_clipboard_read_text_finish(clipboard, result, NULL);
+    if (text && g_paste_text_fn && g_paste_surface) {
+        g_paste_text_fn(g_paste_surface, text, strlen(text));
+    }
+    g_free(text);
+}
+
+void cmux_ghostty_paste_from_clipboard(void* surface) {
+    if (!g_surface_text || !surface) return;
+    g_paste_text_fn = g_surface_text;
+    g_paste_surface = surface;
+
+    GdkDisplay *display = gdk_display_get_default();
+    if (!display) return;
+    GdkClipboard *clipboard = gdk_display_get_clipboard(display);
+    gdk_clipboard_read_text_async(clipboard, NULL, clipboard_text_received, NULL);
+}
+
 // Selection copy support
 typedef struct {
     uint32_t offset_start;

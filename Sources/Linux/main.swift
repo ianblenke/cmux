@@ -5,6 +5,7 @@
 
 import Foundation
 import CGtk4
+import CGhosttyHelpers
 
 // MARK: - Global State
 
@@ -156,10 +157,8 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
                 }
                 // Ctrl+Shift+V: paste from clipboard
                 if isShift && (keyval == UInt32(GDK_KEY_v) || keyval == UInt32(GDK_KEY_V)) {
-                    // Use ghostty's built-in paste via binding action
                     if let surface = workspaceManager.activeSurface {
-                        // Send paste binding action
-                        gApp.sendText("\u{16}")  // Ctrl+V raw — ghostty handles paste
+                        cmux_ghostty_paste_from_clipboard(surface)
                     }
                     return 1
                 }

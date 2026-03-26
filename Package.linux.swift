@@ -47,9 +47,23 @@ let package = Package(
         // C helpers for ghostty ABI-correct function calls
         .target(
             name: "CGhosttyHelpers",
+            dependencies: ["CGtk4"],
             path: "Sources/CGhosttyHelpers",
             publicHeadersPath: "include",
-            linkerSettings: [.linkedLibrary("dl")]
+            cSettings: [
+                .unsafeFlags([
+                    "-I/usr/include/gtk-4.0",
+                    "-I/usr/include/glib-2.0",
+                    "-I/usr/lib/glib-2.0/include",
+                    "-I/usr/include/pango-1.0",
+                    "-I/usr/include/harfbuzz",
+                    "-I/usr/include/gdk-pixbuf-2.0",
+                    "-I/usr/include/cairo",
+                    "-I/usr/include/graphene-1.0",
+                    "-I/usr/lib/graphene-1.0/include",
+                ]),
+            ],
+            linkerSettings: [.linkedLibrary("dl"), .linkedLibrary("gtk-4")]
         ),
 
         // Linux GTK4 application

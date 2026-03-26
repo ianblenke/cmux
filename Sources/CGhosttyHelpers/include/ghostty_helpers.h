@@ -22,6 +22,9 @@ void cmux_ghostty_surface_text(
     size_t len
 );
 
+// Paste from GDK clipboard into ghostty surface
+void cmux_ghostty_paste_from_clipboard(void* surface);
+
 // Selection copy
 void cmux_ghostty_resolve_selection_fns(void* lib_handle);
 // Returns malloc'd string (caller must free), or NULL if no selection
