@@ -5,6 +5,21 @@
 
 void cmux_ghostty_resolve_key_fns(void* lib_handle);
 
+// Action callback routing
+typedef void (*cmux_title_changed_cb)(const char* title);
+typedef void (*cmux_pwd_changed_cb)(const char* pwd);
+typedef void (*cmux_render_cb)(void);
+
+void cmux_set_action_callbacks(
+    cmux_title_changed_cb title_cb,
+    cmux_pwd_changed_cb pwd_cb,
+    cmux_render_cb render_cb
+);
+
+// Get the action handler function pointer (correct ABI for ghostty)
+// Store this in the runtime config's action_cb field.
+void* cmux_ghostty_get_action_handler(void);
+
 bool cmux_ghostty_surface_key(
     void* surface,
     int action,

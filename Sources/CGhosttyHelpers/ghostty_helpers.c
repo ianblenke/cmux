@@ -72,6 +72,95 @@ void cmux_ghostty_surface_text(
     g_surface_text(surface, text, len);
 }
 
+// Action callback routing
+// The ghostty action callback receives structs by value which Swift can't handle.
+// This C helper wraps the callback and extracts action data for Swift.
+
+typedef struct {
+    int tag;
+    // Union follows — we read specific fields based on tag
+} ghostty_action_s_header;
+
+typedef struct {
+    const char* title;
+} ghostty_action_set_title_s;
+
+typedef struct {
+    const char* pwd;
+} ghostty_action_pwd_s;
+
+// Action tag constants
+#define ACTION_RENDER 27
+#define ACTION_SET_TITLE 32
+#define ACTION_PWD 34
+
+// Swift callback for title changes
+typedef void (*cmux_title_changed_cb)(const char* title);
+typedef void (*cmux_pwd_changed_cb)(const char* pwd);
+typedef void (*cmux_render_cb)(void);
+
+static cmux_title_changed_cb g_title_cb = NULL;
+static cmux_pwd_changed_cb g_pwd_cb = NULL;
+static cmux_render_cb g_render_cb = NULL;
+
+void cmux_set_action_callbacks(
+    cmux_title_changed_cb title_cb,
+    cmux_pwd_changed_cb pwd_cb,
+    cmux_render_cb render_cb
+) {
+    g_title_cb = title_cb;
+    g_pwd_cb = pwd_cb;
+    g_render_cb = render_cb;
+}
+
+// ghostty structs we need to receive by value
+typedef struct {
+    int tag;
+    union {
+        void* surface;
+    };
+} ghostty_target_s;
+
+typedef struct {
+    int tag;
+    int _pad;
+    union {
+        ghostty_action_set_title_s set_title;
+        ghostty_action_pwd_s pwd;
+        char _data[24];
+    };
+} ghostty_action_s;
+
+// C action callback with correct struct-by-value ABI
+bool cmux_ghostty_action_handler(
+    void* app,
+    ghostty_target_s target,
+    ghostty_action_s action
+) {
+    int tag = action.tag;
+
+    switch (tag) {
+        case ACTION_RENDER:
+            if (g_render_cb) g_render_cb();
+            return true;
+        case ACTION_SET_TITLE:
+            if (g_title_cb && action.set_title.title)
+                g_title_cb(action.set_title.title);
+            return true;
+        case ACTION_PWD:
+            if (g_pwd_cb && action.pwd.pwd)
+                g_pwd_cb(action.pwd.pwd);
+            return true;
+        default:
+            return false;
+    }
+}
+
+// Get the action handler function pointer for storing in runtime config
+void* cmux_ghostty_get_action_handler(void) {
+    return (void*)cmux_ghostty_action_handler;
+}
+
 // Paste support — read GDK clipboard and send to ghostty surface
 #include <gtk/gtk.h>
 

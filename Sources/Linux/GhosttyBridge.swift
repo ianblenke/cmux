@@ -25,23 +25,9 @@ private let wakeupCb: @convention(c) (UnsafeMutableRawPointer?) -> Void = { _ in
     }, nil)
 }
 
-// The action callback. On x86_64 SysV ABI, ghostty_action_s (32 bytes)
-// is passed via hidden pointer. The tag is at offset 0.
-private let GHOSTTY_ACTION_RENDER: Int32 = 27
-private let GHOSTTY_ACTION_QUIT: Int32 = 40
-
-private let actionCb: @convention(c) (
-    UnsafeMutableRawPointer?,  // ghostty_app_t
-    UnsafeMutableRawPointer?,  // ghostty_target_s
-    UnsafeMutableRawPointer?   // ghostty_action_s
-) -> Bool = { _, _, actionPtr in
-    // Try to read the action tag — the struct is passed by hidden pointer
-    // on x86_64 for >16 byte structs
-    if let glArea = globalGLArea {
-        gtk_gl_area_queue_render(glArea)
-    }
-    return false
-}
+// Action callback — routes through C helper for correct ABI handling.
+// cmux_ghostty_action_handler parses the action struct and calls our
+// Swift callbacks for title, pwd, and render events.
 
 // Read clipboard: ghostty wants to paste. We need to read from GDK clipboard
 // and call ghostty_surface_complete_clipboard_request with the result.
@@ -185,6 +171,30 @@ final class GhosttyApp {
         cmux_ghostty_resolve_key_fns(h)
         cmux_ghostty_resolve_selection_fns(h)
 
+        // Set up action callbacks for title/pwd/render
+        cmux_set_action_callbacks(
+            // Title changed
+            { title in
+                guard let title = title else { return }
+                let str = String(cString: title)
+                cmuxLog("[action] title: \(str)")
+                workspaceManager.updateActiveTitle(str)
+            },
+            // PWD changed
+            { pwd in
+                guard let pwd = pwd else { return }
+                let str = String(cString: pwd)
+                cmuxLog("[action] pwd: \(str)")
+                workspaceManager.updateActiveCwd(str)
+            },
+            // Render requested
+            {
+                if let glArea = globalGLArea {
+                    gtk_gl_area_queue_render(glArea)
+                }
+            }
+        )
+
         // Step 1: ghostty_init
         cmuxLog("[GhosttyBridge] ghostty_init...")
         let initResult = ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv)
@@ -206,7 +216,9 @@ final class GhosttyApp {
         rtConfig.withUnsafeMutableBytes { buf in
             buf.storeBytes(of: true, toByteOffset: 8, as: Bool.self)
             buf.storeBytes(of: wakeupCb, toByteOffset: 16, as: (@convention(c) (UnsafeMutableRawPointer?) -> Void).self)
-            buf.storeBytes(of: actionCb, toByteOffset: 24, as: (@convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Bool).self)
+            // Use C action handler with correct struct-by-value ABI
+            let actionFnPtr = cmux_ghostty_get_action_handler()!
+            buf.storeBytes(of: actionFnPtr, toByteOffset: 24, as: UnsafeMutableRawPointer.self)
             buf.storeBytes(of: readClipboardCb, toByteOffset: 32, as: (@convention(c) (UnsafeMutableRawPointer?, Int32, UnsafeMutableRawPointer?) -> Void).self)
             buf.storeBytes(of: confirmReadClipboardCb, toByteOffset: 40, as: (@convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UnsafeMutableRawPointer?, Int32) -> Void).self)
             buf.storeBytes(of: writeClipboardCb, toByteOffset: 48, as: (@convention(c) (UnsafeMutableRawPointer?, Int32, UnsafeMutableRawPointer?, Int, Bool) -> Void).self)

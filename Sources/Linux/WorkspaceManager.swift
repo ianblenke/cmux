@@ -83,6 +83,53 @@ final class WorkspaceManager {
         cmuxLog("[workspace] Switched to workspace \(index + 1)")
     }
 
+    /// Pending title/cwd updates (set from any thread, applied on main thread)
+    var pendingTitle: String?
+    var pendingCwd: String?
+
+    /// Update the active workspace's title (called from action callback thread)
+    func updateActiveTitle(_ title: String) {
+        pendingTitle = title
+        g_idle_add({ _ -> gboolean in
+            workspaceManager.applyPendingUpdates()
+            return 0
+        }, nil)
+    }
+
+    /// Update the active workspace's CWD (called from action callback thread)
+    func updateActiveCwd(_ cwd: String) {
+        pendingCwd = cwd
+        g_idle_add({ _ -> gboolean in
+            workspaceManager.applyPendingUpdates()
+            return 0
+        }, nil)
+    }
+
+    /// Apply pending title/cwd updates on the GTK main thread
+    func applyPendingUpdates() {
+        guard activeIndex >= 0, activeIndex < workspaces.count else { return }
+        var changed = false
+
+        if let title = pendingTitle {
+            workspaces[activeIndex].title = "\(workspaces[activeIndex].id): \(title)"
+            pendingTitle = nil
+            changed = true
+        }
+
+        if let cwd = pendingCwd {
+            let home = ProcessInfo.processInfo.environment["HOME"] ?? ""
+            let display = cwd.hasPrefix(home) ? "~" + cwd.dropFirst(home.count) : cwd
+            workspaces[activeIndex].cwd = String(display)
+            workspaces[activeIndex].title = "\(workspaces[activeIndex].id): \(display)"
+            pendingCwd = nil
+            changed = true
+        }
+
+        if changed {
+            updateSidebar()
+        }
+    }
+
     /// Close the active workspace
     func closeActive() {
         guard workspaces.count > 1 else {
