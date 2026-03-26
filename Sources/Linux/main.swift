@@ -165,6 +165,19 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
                     }
                     return 1
                 }
+                // Alt+Ctrl+arrows: focus pane directionally
+                let isAlt = mods & 4 != 0
+                if isAlt && (keyval == UInt32(GDK_KEY_Left) || keyval == UInt32(GDK_KEY_Right) ||
+                             keyval == UInt32(GDK_KEY_Up) || keyval == UInt32(GDK_KEY_Down)) {
+                    // Move focus to next/prev child widget in the paned tree
+                    if let win = workspaceManager.window {
+                        let winWidget = unsafeBitCast(win, to: UnsafeMutablePointer<GtkWidget>.self)
+                        let forward = keyval == UInt32(GDK_KEY_Right) || keyval == UInt32(GDK_KEY_Down)
+                        _ = gtk_widget_child_focus(winWidget, forward ? GTK_DIR_TAB_FORWARD : GTK_DIR_TAB_BACKWARD)
+                    }
+                    return 1
+                }
+
                 // Ctrl+D / Ctrl+Shift+D: split pane
                 if keyval == UInt32(GDK_KEY_d) || keyval == UInt32(GDK_KEY_D) {
                     let orientation: PaneSplit.SplitOrientation = isShift ? .vertical : .horizontal
