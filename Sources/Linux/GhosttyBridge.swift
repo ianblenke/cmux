@@ -79,6 +79,8 @@ final class GhosttyApp {
     private var fn_surface_set_focus: (@convention(c) (UnsafeMutableRawPointer?, Bool) -> Void)?
     private var fn_surface_set_content_scale: (@convention(c) (UnsafeMutableRawPointer?, Double, Double) -> Void)?
     private var fn_surface_refresh: (@convention(c) (UnsafeMutableRawPointer?) -> Void)?
+    private var fn_surface_key: (@convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Bool)?
+    private var fn_surface_text: (@convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UInt) -> Void)?
     private var fn_config_free: (@convention(c) (UnsafeMutableRawPointer?) -> Void)?
 
     init?() {
@@ -122,7 +124,9 @@ final class GhosttyApp {
               let surface_refresh: @convention(c) (UnsafeMutableRawPointer?) -> Void = sym("ghostty_surface_refresh"),
               let surface_set_size: @convention(c) (UnsafeMutableRawPointer?, UInt32, UInt32) -> Void = sym("ghostty_surface_set_size"),
               let surface_set_focus: @convention(c) (UnsafeMutableRawPointer?, Bool) -> Void = sym("ghostty_surface_set_focus"),
-              let surface_set_scale: @convention(c) (UnsafeMutableRawPointer?, Double, Double) -> Void = sym("ghostty_surface_set_content_scale")
+              let surface_set_scale: @convention(c) (UnsafeMutableRawPointer?, Double, Double) -> Void = sym("ghostty_surface_set_content_scale"),
+              let surface_key: @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Bool = sym("ghostty_surface_key"),
+              let surface_text: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UInt) -> Void = sym("ghostty_surface_text")
         else {
             cmuxLog("[GhosttyBridge] Symbol resolution failed")
             dlclose(h); handle = nil; return nil
@@ -138,6 +142,8 @@ final class GhosttyApp {
         self.fn_surface_set_size = surface_set_size
         self.fn_surface_set_focus = surface_set_focus
         self.fn_surface_set_content_scale = surface_set_scale
+        self.fn_surface_key = surface_key
+        self.fn_surface_text = surface_text
 
         // Step 1: ghostty_init
         cmuxLog("[GhosttyBridge] ghostty_init...")
@@ -208,6 +214,58 @@ final class GhosttyApp {
         } else {
             cmuxLog("[GhosttyBridge] Surface creation failed")
             return false
+        }
+    }
+
+    /// Send a key event to the ghostty surface.
+    /// keycode: hardware evdev scancode (from GTK EventControllerKey)
+    /// text: UTF-8 text produced by the key (from gdk_keyval_to_unicode)
+    /// mods: ghostty modifier flags
+    /// action: 0=release, 1=press, 2=repeat
+    func sendKey(keycode: UInt32, text: String?, mods: Int32, action: Int32) -> Bool {
+        guard let surface = surface, let fn = fn_surface_key else { return false }
+
+        // Build ghostty_input_key_s (32 bytes)
+        var keyBuf = [UInt8](repeating: 0, count: 32)
+        var result = false
+
+        if let text = text, !text.isEmpty {
+            text.withCString { cStr in
+                keyBuf.withUnsafeMutableBytes { buf in
+                    buf.storeBytes(of: action, toByteOffset: 0, as: Int32.self)       // action
+                    buf.storeBytes(of: mods, toByteOffset: 4, as: Int32.self)          // mods
+                    buf.storeBytes(of: Int32(0), toByteOffset: 8, as: Int32.self)      // consumed_mods
+                    buf.storeBytes(of: keycode, toByteOffset: 12, as: UInt32.self)     // keycode
+                    buf.storeBytes(of: cStr, toByteOffset: 16, as: UnsafePointer<CChar>.self)  // text
+                    buf.storeBytes(of: UInt32(0), toByteOffset: 24, as: UInt32.self)   // unshifted_codepoint
+                    buf.storeBytes(of: false, toByteOffset: 28, as: Bool.self)         // composing
+                }
+                result = keyBuf.withUnsafeMutableBytes { buf in
+                    fn(surface, buf.baseAddress!)
+                }
+            }
+        } else {
+            keyBuf.withUnsafeMutableBytes { buf in
+                buf.storeBytes(of: action, toByteOffset: 0, as: Int32.self)
+                buf.storeBytes(of: mods, toByteOffset: 4, as: Int32.self)
+                buf.storeBytes(of: Int32(0), toByteOffset: 8, as: Int32.self)
+                buf.storeBytes(of: keycode, toByteOffset: 12, as: UInt32.self)
+                // text pointer remains null (0)
+                buf.storeBytes(of: UInt32(0), toByteOffset: 24, as: UInt32.self)
+                buf.storeBytes(of: false, toByteOffset: 28, as: Bool.self)
+            }
+            result = keyBuf.withUnsafeMutableBytes { buf in
+                fn(surface, buf.baseAddress!)
+            }
+        }
+        return result
+    }
+
+    /// Send raw text input to the surface (for IME).
+    func sendText(_ text: String) {
+        guard let surface = surface, let fn = fn_surface_text else { return }
+        text.withCString { cStr in
+            fn(surface, cStr, UInt(text.utf8.count))
         }
     }
 

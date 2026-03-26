@@ -108,6 +108,68 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
     }
 
     gtk_box_append(hboxPtr, content)
+
+    // Keyboard input — route to ghostty surface
+    if ghosttyApp != nil {
+        let keyController = gtk_event_controller_key_new()!
+
+        // Key press
+        let keyPressCb: @convention(c) (
+            OpaquePointer?, UInt32, UInt32, UInt32, gpointer?
+        ) -> gboolean = { _, keyval, keycode, state, _ in
+            guard let gApp = ghosttyApp else { return 0 }
+
+            // Map GDK modifier state to ghostty mods
+            var mods: Int32 = 0
+            if state & UInt32(GDK_SHIFT_MASK.rawValue) != 0 { mods |= 1 }    // GHOSTTY_MODS_SHIFT
+            if state & UInt32(GDK_CONTROL_MASK.rawValue) != 0 { mods |= 2 }   // GHOSTTY_MODS_CTRL
+            if state & UInt32(GDK_ALT_MASK.rawValue) != 0 { mods |= 4 }       // GHOSTTY_MODS_ALT
+            if state & UInt32(GDK_SUPER_MASK.rawValue) != 0 { mods |= 8 }     // GHOSTTY_MODS_SUPER
+
+            // Convert keyval to UTF-8 text
+            let unichar = gdk_keyval_to_unicode(keyval)
+            var text: String? = nil
+            if unichar > 0, unichar < 0x110000, let scalar = Unicode.Scalar(unichar) {
+                let ch = Character(scalar)
+                if !ch.isNewline || keyval == GDK_KEY_Return || keyval == GDK_KEY_KP_Enter {
+                    text = String(ch)
+                }
+            }
+
+            return gApp.sendKey(keycode: keycode, text: text, mods: mods, action: 1) ? 1 : 0
+        }
+        g_signal_connect_data(UnsafeMutableRawPointer(keyController), "key-pressed",
+            unsafeBitCast(keyPressCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
+
+        // Key release
+        let keyReleaseCb: @convention(c) (
+            OpaquePointer?, UInt32, UInt32, UInt32, gpointer?
+        ) -> Void = { _, keyval, keycode, state, _ in
+            guard let gApp = ghosttyApp else { return }
+            var mods: Int32 = 0
+            if state & UInt32(GDK_SHIFT_MASK.rawValue) != 0 { mods |= 1 }
+            if state & UInt32(GDK_CONTROL_MASK.rawValue) != 0 { mods |= 2 }
+            if state & UInt32(GDK_ALT_MASK.rawValue) != 0 { mods |= 4 }
+            if state & UInt32(GDK_SUPER_MASK.rawValue) != 0 { mods |= 8 }
+            _ = gApp.sendKey(keycode: keycode, text: nil, mods: mods, action: 0)
+        }
+        g_signal_connect_data(UnsafeMutableRawPointer(keyController), "key-released",
+            unsafeBitCast(keyReleaseCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
+
+        // Add controller to the window widget
+        let windowWidget = unsafeBitCast(win, to: UnsafeMutablePointer<GtkWidget>.self)
+        // gtk_widget_add_controller expects GtkEventController*
+        // keyController is already an OpaquePointer from gtk_event_controller_key_new
+        withUnsafeMutablePointer(to: &windowWidget.pointee) { wPtr in
+            // We need to pass it through — GTK4 takes ownership of the controller
+        }
+        // Use the C function directly with raw pointer cast
+        typealias AddControllerFn = @convention(c) (UnsafeMutablePointer<GtkWidget>?, OpaquePointer?) -> Void
+        let addController: AddControllerFn = gtk_widget_add_controller
+        addController(windowWidget, keyController)
+        cmuxLog("[cmux] Keyboard input connected")
+    }
+
     gtk_window_present(win)
     cmuxLog("[cmux] Window presented")
 }
