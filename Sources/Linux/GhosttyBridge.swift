@@ -97,6 +97,7 @@ final class GhosttyApp {
     private var fn_surface_mouse_button: (@convention(c) (UnsafeMutableRawPointer?, Int32, Int32, Int32) -> Bool)?
     private var fn_surface_mouse_pos: (@convention(c) (UnsafeMutableRawPointer?, Double, Double, Int32) -> Void)?
     private var fn_surface_mouse_scroll: (@convention(c) (UnsafeMutableRawPointer?, Double, Double, Int32) -> Void)?
+    private var fn_surface_binding_action: (@convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UInt) -> Bool)?
     private var fn_config_free: (@convention(c) (UnsafeMutableRawPointer?) -> Void)?
 
     init?() {
@@ -145,7 +146,8 @@ final class GhosttyApp {
               let surface_text: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UInt) -> Void = sym("ghostty_surface_text"),
               let surface_mouse_button: @convention(c) (UnsafeMutableRawPointer?, Int32, Int32, Int32) -> Bool = sym("ghostty_surface_mouse_button"),
               let surface_mouse_pos: @convention(c) (UnsafeMutableRawPointer?, Double, Double, Int32) -> Void = sym("ghostty_surface_mouse_pos"),
-              let surface_mouse_scroll: @convention(c) (UnsafeMutableRawPointer?, Double, Double, Int32) -> Void = sym("ghostty_surface_mouse_scroll")
+              let surface_mouse_scroll: @convention(c) (UnsafeMutableRawPointer?, Double, Double, Int32) -> Void = sym("ghostty_surface_mouse_scroll"),
+              let surface_binding_action: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UInt) -> Bool = sym("ghostty_surface_binding_action")
         else {
             cmuxLog("[GhosttyBridge] Symbol resolution failed")
             dlclose(h); handle = nil; return nil
@@ -166,6 +168,7 @@ final class GhosttyApp {
         self.fn_surface_mouse_button = surface_mouse_button
         self.fn_surface_mouse_pos = surface_mouse_pos
         self.fn_surface_mouse_scroll = surface_mouse_scroll
+        self.fn_surface_binding_action = surface_binding_action
 
         // Resolve C helper functions (for correct ABI calling convention)
         cmux_ghostty_resolve_key_fns(h)
@@ -333,6 +336,17 @@ final class GhosttyApp {
         guard let surface = surface else { return }
         text.withCString { cStr in
             cmux_ghostty_surface_text(surface, cStr, text.utf8.count)
+        }
+    }
+
+    // MARK: - Binding Actions
+
+    /// Execute a ghostty binding action by name (e.g., "increase_font_size:1")
+    @discardableResult
+    func bindingAction(_ action: String) -> Bool {
+        guard let surface = surface, let fn = fn_surface_binding_action else { return false }
+        return action.withCString { cStr in
+            fn(surface, cStr, UInt(action.utf8.count))
         }
     }
 

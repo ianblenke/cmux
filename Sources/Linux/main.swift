@@ -233,6 +233,22 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
                 }
             }
 
+            // === Font size: Ctrl+Plus/Minus/0 ===
+            if isCtrl {
+                if keyval == UInt32(GDK_KEY_plus) || keyval == UInt32(GDK_KEY_equal) {
+                    gApp.bindingAction("increase_font_size:1")
+                    return 1
+                }
+                if keyval == UInt32(GDK_KEY_minus) || keyval == UInt32(GDK_KEY_underscore) {
+                    gApp.bindingAction("decrease_font_size:1")
+                    return 1
+                }
+                if keyval == UInt32(GDK_KEY_0) {
+                    gApp.bindingAction("reset_font_size")
+                    return 1
+                }
+            }
+
             // === Alt+arrows: pane focus navigation ===
             if isAlt && isCtrl {
                 if keyval == UInt32(GDK_KEY_Left) || keyval == UInt32(GDK_KEY_Right) ||
