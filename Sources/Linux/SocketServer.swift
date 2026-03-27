@@ -164,6 +164,14 @@ class SocketControlServer {
             return
         }
 
+        // Handle workspace.list with raw JSON (AnyCodable can't encode [[String:String]])
+        if request.method == "workspace.list" {
+            let raw = handleWorkspaceList(id: request.id)
+            let bytes = Array(raw.utf8)
+            _ = write(fd, bytes, bytes.count)
+            return
+        }
+
         // Route to handler
         let response = handleRequest(request)
 
@@ -173,6 +181,17 @@ class SocketControlServer {
             let bytes = Array(responseStr.utf8)
             _ = write(fd, bytes, bytes.count)
         }
+    }
+
+    /// Handle workspace.list specially (returns raw JSON)
+    private func handleWorkspaceList(id: Int?) -> String {
+        let items = workspaceManager.workspaces.map { ws -> String in
+            let active = ws.id == workspaceManager.activeWorkspace?.id
+            let escapedTitle = ws.title.replacingOccurrences(of: "\"", with: "\\\"")
+            let escapedCwd = ws.cwd.replacingOccurrences(of: "\"", with: "\\\"")
+            return "{\"id\":\"\(ws.id)\",\"title\":\"\(escapedTitle)\",\"cwd\":\"\(escapedCwd)\",\"active\":\"\(active)\",\"hasUnread\":\"\(ws.hasUnread)\"}"
+        }
+        return "{\"jsonrpc\":\"2.0\",\"id\":\(id ?? 0),\"result\":[\(items.joined(separator: ","))]}"
     }
 
     /// Route a request to the appropriate handler
@@ -189,21 +208,8 @@ class SocketControlServer {
             ])
 
         case "workspace.list":
-            let workspaces = workspaceManager.workspaces.map { ws -> [String: String] in
-                [
-                    "id": String(ws.id),
-                    "title": ws.title,
-                    "cwd": ws.cwd,
-                    "active": String(ws.id == workspaceManager.activeWorkspace?.id),
-                    "hasUnread": String(ws.hasUnread),
-                ]
-            }
-            return SocketResponse(
-                jsonrpc: "2.0",
-                result: AnyCodable(workspaces),
-                error: nil,
-                id: id
-            )
+            // Use raw JSON to avoid AnyCodable array serialization issues
+            return SocketResponse(jsonrpc: "2.0", result: AnyCodable("__RAW__"), error: nil, id: id)
 
         case "workspace.create":
             // Schedule workspace creation on GTK main thread

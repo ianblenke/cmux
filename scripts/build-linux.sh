@@ -11,14 +11,16 @@ RUN=0
 RELEASE=0
 REBUILD_GHOSTTY=0
 INSTALL=0
+TEST=0
 for arg in "$@"; do
     case "$arg" in
         --run) RUN=1 ;;
         --release) RELEASE=1 ;;
         --rebuild-ghostty) REBUILD_GHOSTTY=1 ;;
         --install) INSTALL=1; RELEASE=1 ;;
+        --test) TEST=1 ;;
         --help|-h)
-            echo "Usage: $0 [--run] [--release] [--install] [--rebuild-ghostty]"
+            echo "Usage: $0 [--run] [--release] [--install] [--test] [--rebuild-ghostty]"
             echo ""
             echo "Options:"
             echo "  --run              Build and launch"
@@ -145,6 +147,12 @@ if [ "$INSTALL" = "1" ]; then
     echo ""
     echo "Make sure ~/.local/bin is in your PATH:"
     echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+fi
+
+if [ "$TEST" = "1" ]; then
+    echo ""
+    echo "=== Running E2E tests ==="
+    exec "$PROJECT_DIR/scripts/test-e2e.sh"
 fi
 
 if [ "$RUN" = "1" ]; then
