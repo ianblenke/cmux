@@ -128,17 +128,10 @@ final class WorkspaceManager {
         g_signal_connect_data(newGlArea, "resize",
             unsafeBitCast(resizeCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
 
-        // Wrap GL area in its own box (prevents hidden GL areas from receiving resize)
-        guard let wrapper = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0) else { return 0 }
-        gtk_widget_set_hexpand(wrapper, 1)
-        gtk_widget_set_vexpand(wrapper, 1)
-        gtk_box_append(unsafeBitCast(wrapper, to: UnsafeMutablePointer<GtkBox>.self), newGlArea)
-        ws.contentWidget = wrapper  // Store the wrapper, not the raw GL area
+        ws.contentWidget = newGlArea
 
-        if let container = contentContainer {
-            gtk_widget_set_visible(wrapper, 0)  // Hidden by default
-            gtk_box_append(container, wrapper)
-        }
+        // Hold a strong ref so the widget survives being unparented
+        g_object_ref(UnsafeMutableRawPointer(newGlArea))
 
         workspaces.append(ws)
         activeIndex = workspaces.count - 1
@@ -158,30 +151,36 @@ final class WorkspaceManager {
     var currentDisplayedWidget: UnsafeMutablePointer<GtkWidget>?
 
     func showActiveInStack() {
+        guard let container = contentContainer else { return }
         guard let ws = activeWorkspace else { return }
         guard let newWidget = ws.contentWidget else { return }
 
-        // Hide all workspace wrappers, show only the active one
-        for w in workspaces {
-            if let widget = w.contentWidget {
-                gtk_widget_set_visible(widget, widget == newWidget ? 1 : 0)
-            }
+        // Remove current widget from container (if different)
+        if let current = currentDisplayedWidget, current != newWidget {
+            gtk_box_remove(container, current)
+            // Widget stays alive due to g_object_ref from createWorkspace
         }
 
-        // Focus the GL area inside the wrapper
-        if let glArea = ws.glArea {
+        // Add new widget to container (if not already there)
+        if newWidget != currentDisplayedWidget {
+            gtk_box_append(container, newWidget)
+            currentDisplayedWidget = newWidget
+        }
+
+        // Focus and resize the surface
+        if let glArea = ws.glArea, let surface = ws.surface, let gApp = getGhosttyApp() {
             let glWidget = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
             _ = gtk_widget_grab_focus(glWidget)
 
-            // Re-apply size to the surface (it may have missed resize events while hidden)
-            if let surface = ws.surface, let gApp = getGhosttyApp() {
-                let w = gtk_widget_get_width(glWidget)
-                let h = gtk_widget_get_height(glWidget)
-                if w > 0 && h > 0 {
-                    gApp.fn_surface_set_size?(surface, UInt32(w), UInt32(h))
-                }
-                gApp.fn_surface_set_focus?(surface, true)
+            // Apply current container size to the surface
+            let containerWidget = unsafeBitCast(container, to: UnsafeMutablePointer<GtkWidget>.self)
+            let w = gtk_widget_get_width(containerWidget)
+            let h = gtk_widget_get_height(containerWidget)
+            if w > 0 && h > 0 {
+                gApp.fn_surface_set_size?(surface, UInt32(w), UInt32(h))
             }
+            gApp.fn_surface_set_focus?(surface, true)
+            gtk_gl_area_queue_render(glArea)
         }
     }
 
@@ -445,10 +444,13 @@ final class WorkspaceManager {
         let removed = workspaces.remove(at: activeIndex)
         cmuxLog("[workspace] Closed workspace \(removed.id)")
 
-        // Remove the widget from the container
-        if let contentWidget = removed.contentWidget, let container = contentContainer {
-            gtk_widget_set_visible(contentWidget, 0)
-            gtk_box_remove(container, contentWidget)
+        // Remove the widget from container if displayed, release ref
+        if let contentWidget = removed.contentWidget {
+            if contentWidget == currentDisplayedWidget, let container = contentContainer {
+                gtk_box_remove(container, contentWidget)
+                currentDisplayedWidget = nil
+            }
+            g_object_unref(UnsafeMutableRawPointer(contentWidget))
         }
 
         // Free the surface
