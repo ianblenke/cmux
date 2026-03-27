@@ -167,6 +167,7 @@ final class WorkspaceManager {
                 displayTitle = title
             }
             workspaces[activeIndex].title = "\(workspaces[activeIndex].id): \(displayTitle)"
+            workspaces[activeIndex].cwd = displayTitle  // Update CWD from title path
             pendingTitle = nil
             changed = true
         }
@@ -193,9 +194,15 @@ final class WorkspaceManager {
         guard let gApp = getGhosttyApp() else { return }
         guard let contentBox = contentBoxWidget else { return }
 
-        // Create two new panes (both start in home dir — CWD inheritance TODO)
-        guard let pane1 = createTerminalPane(ghosttyApp: gApp),
-              let pane2 = createTerminalPane(ghosttyApp: gApp) else {
+        // Get current CWD for inheritance — expand ~ back to full path
+        let currentCwd = workspaces[activeIndex].cwd
+        let home = ProcessInfo.processInfo.environment["HOME"] ?? "/home"
+        let fullCwd: String? = currentCwd.hasPrefix("~")
+            ? home + currentCwd.dropFirst(1) : (currentCwd == "~" ? home : currentCwd)
+
+        // Create two new panes inheriting the current CWD
+        guard let pane1 = createTerminalPane(ghosttyApp: gApp, workingDirectory: fullCwd),
+              let pane2 = createTerminalPane(ghosttyApp: gApp, workingDirectory: fullCwd) else {
             cmuxLog("[split] Failed to create panes")
             return
         }

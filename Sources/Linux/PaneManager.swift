@@ -17,9 +17,11 @@ class PaneLeaf {
     var surface: UnsafeMutableRawPointer?  // ghostty_surface_t
     var glArea: UnsafeMutablePointer<GtkGLArea>?
     var widget: UnsafeMutablePointer<GtkWidget>?  // The GL area as widget
+    var initialWorkingDirectory: String?
 
-    init(id: Int) {
+    init(id: Int, workingDirectory: String? = nil) {
         self.id = id
+        self.initialWorkingDirectory = workingDirectory
     }
 }
 
@@ -46,8 +48,8 @@ class PaneSplit {
 private var nextPaneId = 1
 
 /// Create a new terminal pane with GtkGLArea and ghostty surface
-func createTerminalPane(ghosttyApp: GhosttyApp) -> PaneLeaf? {
-    let pane = PaneLeaf(id: nextPaneId)
+func createTerminalPane(ghosttyApp: GhosttyApp, workingDirectory: String? = nil) -> PaneLeaf? {
+    let pane = PaneLeaf(id: nextPaneId, workingDirectory: workingDirectory)
     nextPaneId += 1
 
     // Create GtkGLArea
@@ -62,6 +64,10 @@ func createTerminalPane(ghosttyApp: GhosttyApp) -> PaneLeaf? {
 
     pane.glArea = glAreaPtr
     pane.widget = glArea
+    // Store CWD for the realize callback
+    if let wd = workingDirectory {
+        paneManager.setCwd(glArea: glAreaPtr, cwd: wd)
+    }
 
     // Render callback — draws this pane's surface
     let renderCb: @convention(c) (UnsafeMutablePointer<GtkGLArea>?, OpaquePointer?, gpointer?) -> gboolean = { glArea, ctx, userData in
@@ -80,7 +86,8 @@ func createTerminalPane(ghosttyApp: GhosttyApp) -> PaneLeaf? {
         let glPtr = unsafeBitCast(widget, to: UnsafeMutablePointer<GtkGLArea>.self)
         gtk_gl_area_make_current(glPtr)
 
-        if gApp.createSurface(glArea: glPtr, widget: widget) {
+        let cwd = paneManager.getCwd(glArea: glPtr)
+        if gApp.createSurface(glArea: glPtr, widget: widget, workingDirectory: cwd) {
             paneManager.registerSurface(glArea: glPtr, surface: gApp.surface!)
             let w = gtk_widget_get_width(widget)
             let h = gtk_widget_get_height(widget)
@@ -142,6 +149,8 @@ func buildPaneWidget(_ node: PaneNode) -> UnsafeMutablePointer<GtkWidget>? {
 class PaneGlobalManager {
     /// Map from GtkGLArea pointer to ghostty surface pointer
     private var surfaceMap: [UnsafeMutableRawPointer: UnsafeMutableRawPointer] = [:]
+    /// Map from GtkGLArea pointer to initial working directory
+    var cwdMap: [UnsafeMutableRawPointer: String] = [:]
 
     func registerSurface(glArea: UnsafeMutablePointer<GtkGLArea>, surface: UnsafeMutableRawPointer) {
         surfaceMap[UnsafeMutableRawPointer(glArea)] = surface
@@ -154,6 +163,16 @@ class PaneGlobalManager {
 
     func removeSurface(glArea: UnsafeMutablePointer<GtkGLArea>) {
         surfaceMap.removeValue(forKey: UnsafeMutableRawPointer(glArea))
+        cwdMap.removeValue(forKey: UnsafeMutableRawPointer(glArea))
+    }
+
+    func setCwd(glArea: UnsafeMutablePointer<GtkGLArea>, cwd: String) {
+        cwdMap[UnsafeMutableRawPointer(glArea)] = cwd
+    }
+
+    func getCwd(glArea: UnsafeMutablePointer<GtkGLArea>?) -> String? {
+        guard let glArea = glArea else { return nil }
+        return cwdMap[UnsafeMutableRawPointer(glArea)]
     }
 }
 
