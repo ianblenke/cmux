@@ -113,22 +113,14 @@ final class WorkspaceManager {
         g_signal_connect_data(newGlArea, "realize",
             unsafeBitCast(realizeCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
 
-        // Resize callback — make GL current, set size, refresh
+        // Resize callback — store pending, debounce to avoid flood
         let resizeCb: @convention(c) (UnsafeMutablePointer<GtkGLArea>?, Int32, Int32, gpointer?) -> Void = { glArea, w, h, _ in
             guard let glArea = glArea, w > 0, h > 0 else { return }
             guard let activeWs = workspaceManager.activeWorkspace,
-                  activeWs.glArea == glArea,
-                  let surface = activeWs.surface,
-                  let gApp = getGhosttyApp() else { return }
-            // Ensure GL context is current before touching ghostty surface
-            gtk_gl_area_make_current(glArea)
-            gApp.fn_surface_set_size?(surface, UInt32(w), UInt32(h))
-            let scale = Double(gtk_widget_get_scale_factor(
-                unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)))
-            gApp.fn_surface_set_content_scale?(surface, scale, scale)
-            gApp.fn_surface_refresh?(surface)
-            gApp.fn_surface_set_focus?(surface, true)
-            gtk_gl_area_queue_render(glArea)
+                  activeWs.glArea == glArea else { return }
+            pendingResizeW = w
+            pendingResizeH = h
+            lastResizeTime = DispatchTime.now().uptimeNanoseconds
         }
         g_signal_connect_data(newGlArea, "resize",
             unsafeBitCast(resizeCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))

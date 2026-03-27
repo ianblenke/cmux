@@ -100,7 +100,32 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
             ghosttyApp?.tick()
             if let ws = workspaceManager.activeWorkspace, let glArea = ws.glArea,
                let surface = ws.surface, let gApp = getGhosttyApp() {
-                // Ensure GL context is current before any surface operations
+                // Check for pending resize (settled for 300ms)
+                if pendingResizeW > 0 && pendingResizeH > 0 {
+                    let now = DispatchTime.now().uptimeNanoseconds
+                    if now - lastResizeTime > 300_000_000 {
+                        // Resize settled — recreate surface to fix GL state
+                        let w = pendingResizeW
+                        let h = pendingResizeH
+                        pendingResizeW = 0
+                        pendingResizeH = 0
+                        let widget = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
+                        gtk_gl_area_make_current(glArea)
+                        // Free old surface
+                        gApp.fn_surface_free?(surface)
+                        // Create new surface at new size
+                        let cwd = ws.cwd
+                        let home = ProcessInfo.processInfo.environment["HOME"] ?? ""
+                        let fullCwd = cwd.hasPrefix("~") ? home + String(cwd.dropFirst(1)) : cwd
+                        if gApp.createSurface(glArea: glArea, widget: widget, workingDirectory: fullCwd) {
+                            paneManager.registerSurface(glArea: glArea, surface: gApp.surface!)
+                            workspaceManager.workspaces[workspaceManager.activeIndex].surface = gApp.surface
+                            gApp.fn_surface_set_size?(gApp.surface!, UInt32(w), UInt32(h))
+                            gApp.fn_surface_set_focus?(gApp.surface!, true)
+                            cmuxLog("[resize] Recreated surface at \(w)x\(h)")
+                        }
+                    }
+                }
                 gtk_gl_area_make_current(glArea)
                 gApp.fn_surface_set_focus?(surface, true)
                 gtk_gl_area_queue_render(glArea)
