@@ -167,6 +167,11 @@ final class WorkspaceManager {
         // Switch visible child in GtkStack
         showActiveInStack()
 
+        // Tell ghostty the new surface is focused (required for key input)
+        if let newSurface = activeSurface {
+            ghosttyApp?.fn_surface_set_focus?(newSurface, true)
+        }
+
         // Queue GL render on the new active workspace
         if let ws = activeWorkspace, let glArea = ws.glArea {
             gtk_gl_area_queue_render(glArea)
