@@ -98,12 +98,15 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
         // Tick timer — process ghostty events on main thread
         g_timeout_add(16, { _ -> gboolean in
             ghosttyApp?.tick()
-            // Always render and re-focus the active workspace
             if let ws = workspaceManager.activeWorkspace, let glArea = ws.glArea {
                 gtk_gl_area_queue_render(glArea)
-                // Continuously re-assert focus — prevents resize/events from defocusing
                 if let surface = ws.surface {
                     ghosttyApp?.fn_surface_set_focus?(surface, true)
+                }
+                // Also re-grab GTK widget focus
+                let w = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
+                if gtk_widget_has_focus(w) == 0 {
+                    _ = gtk_widget_grab_focus(w)
                 }
             }
             return 1
@@ -328,8 +331,9 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
                 text = String(Character(scalar))
             }
 
-            // Log every key for debugging
-            cmuxLog("[key] keyval=\(keyval) hw=\(hwKeycode) evdev=\(evdevKeycode) text=\(text ?? "nil") mods=\(mods)")
+            // Log every key with surface info
+            let surfaceOk = workspaceManager.activeSurface != nil
+            cmuxLog("[key] kv=\(keyval) hw=\(hwKeycode) ev=\(evdevKeycode) t=\(text ?? "-") m=\(mods) surf=\(surfaceOk)")
             let handled = gApp.sendKey(keycode: evdevKeycode, text: text, mods: mods, action: 1)
             cmuxLog("[key] handled=\(handled)")
             return handled ? 1 : 0
