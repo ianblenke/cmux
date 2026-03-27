@@ -98,9 +98,13 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
         // Tick timer — process ghostty events on main thread
         g_timeout_add(16, { _ -> gboolean in
             ghosttyApp?.tick()
-            // Always render the active workspace's GL area
+            // Always render and re-focus the active workspace
             if let ws = workspaceManager.activeWorkspace, let glArea = ws.glArea {
                 gtk_gl_area_queue_render(glArea)
+                // Continuously re-assert focus — prevents resize/events from defocusing
+                if let surface = ws.surface {
+                    ghosttyApp?.fn_surface_set_focus?(surface, true)
+                }
             }
             return 1
         }, nil)
