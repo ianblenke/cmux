@@ -128,10 +128,16 @@ final class WorkspaceManager {
         g_signal_connect_data(newGlArea, "resize",
             unsafeBitCast(resizeCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
 
-        // Add to container (hidden — showActiveInStack will show the active one)
+        // Wrap GL area in its own box (prevents hidden GL areas from receiving resize)
+        guard let wrapper = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0) else { return 0 }
+        gtk_widget_set_hexpand(wrapper, 1)
+        gtk_widget_set_vexpand(wrapper, 1)
+        gtk_box_append(unsafeBitCast(wrapper, to: UnsafeMutablePointer<GtkBox>.self), newGlArea)
+        ws.contentWidget = wrapper  // Store the wrapper, not the raw GL area
+
         if let container = contentContainer {
-            gtk_widget_set_visible(newGlArea, 0)  // Hidden by default
-            gtk_box_append(container, newGlArea)
+            gtk_widget_set_visible(wrapper, 0)  // Hidden by default
+            gtk_box_append(container, wrapper)
         }
 
         workspaces.append(ws)
@@ -155,14 +161,28 @@ final class WorkspaceManager {
         guard let ws = activeWorkspace else { return }
         guard let newWidget = ws.contentWidget else { return }
 
-        // Hide all workspace widgets, show only the active one
+        // Hide all workspace wrappers, show only the active one
         for w in workspaces {
             if let widget = w.contentWidget {
                 gtk_widget_set_visible(widget, widget == newWidget ? 1 : 0)
             }
         }
 
-        _ = gtk_widget_grab_focus(newWidget)
+        // Focus the GL area inside the wrapper
+        if let glArea = ws.glArea {
+            let glWidget = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
+            _ = gtk_widget_grab_focus(glWidget)
+
+            // Re-apply size to the surface (it may have missed resize events while hidden)
+            if let surface = ws.surface, let gApp = getGhosttyApp() {
+                let w = gtk_widget_get_width(glWidget)
+                let h = gtk_widget_get_height(glWidget)
+                if w > 0 && h > 0 {
+                    gApp.fn_surface_set_size?(surface, UInt32(w), UInt32(h))
+                }
+                gApp.fn_surface_set_focus?(surface, true)
+            }
+        }
     }
 
     /// Switch to workspace at index
