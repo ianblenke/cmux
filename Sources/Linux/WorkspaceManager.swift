@@ -146,14 +146,16 @@ final class WorkspaceManager {
     func showActiveInStack() {
         guard let stack = stack else { return }
         guard let ws = activeWorkspace else { return }
-        let stackName = "ws-\(ws.id)"
-        stackName.withCString { cName in
-            gtk_stack_set_visible_child_name(stack, cName)
+        // Use set_visible_child with the widget directly (avoids name lookup issues)
+        if let contentWidget = ws.contentWidget {
+            gtk_stack_set_visible_child(stack, contentWidget)
         }
-        // Focus the GL area
+        // Focus the GL area or content widget
         if let glArea = ws.glArea {
             let widget = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
             _ = gtk_widget_grab_focus(widget)
+        } else if let contentWidget = ws.contentWidget {
+            _ = gtk_widget_grab_focus(contentWidget)
         }
     }
 
@@ -405,7 +407,12 @@ final class WorkspaceManager {
         let removed = workspaces.remove(at: activeIndex)
         cmuxLog("[workspace] Closed workspace \(removed.id)")
 
-        // If we removed a surface, free it
+        // Remove from GtkStack
+        if let stack = stack, let contentWidget = removed.contentWidget {
+            gtk_stack_remove(stack, contentWidget)
+        }
+
+        // Free the surface
         if let surface = removed.surface {
             ghosttyApp?.fn_surface_free?(surface)
         }
@@ -419,6 +426,7 @@ final class WorkspaceManager {
         if let newSurface = activeSurface {
             ghosttyApp?.setFocusOnSurface(newSurface, focused: true)
         }
+        showActiveInStack()
         if let gl = glArea {
             gtk_gl_area_queue_render(gl)
         }
