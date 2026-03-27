@@ -11,6 +11,7 @@ struct Workspace {
     var title: String
     var surface: UnsafeMutableRawPointer?  // primary surface (first pane)
     var cwd: String
+    var glArea: UnsafeMutablePointer<GtkGLArea>?  // Each workspace has its own GL area
     var gitBranch: String?
     var hasUnread: Bool = false
     var lastNotification: String?
@@ -31,8 +32,9 @@ final class WorkspaceManager {
 
     // GTK widgets (set by main.swift)
     var sidebarBox: UnsafeMutablePointer<GtkBox>?
-    var glArea: UnsafeMutablePointer<GtkGLArea>?
+    var glArea: UnsafeMutablePointer<GtkGLArea>?  // Legacy — used for splits only
     var window: UnsafeMutablePointer<GtkWindow>?
+    var stack: OpaquePointer?  // GtkStack — one child per workspace
 
     var activeWorkspace: Workspace? {
         guard activeIndex >= 0, activeIndex < workspaces.count else { return nil }
@@ -43,30 +45,116 @@ final class WorkspaceManager {
         return activeWorkspace?.surface
     }
 
-    /// Create a new workspace with a terminal surface
-    func createWorkspace(ghosttyApp: GhosttyApp, glArea: UnsafeMutablePointer<GtkGLArea>,
-                         widget: UnsafeMutablePointer<GtkWidget>,
+    /// Create a new workspace with its OWN GtkGLArea and ghostty surface
+    func createWorkspace(ghosttyApp: GhosttyApp,
+                         glArea: UnsafeMutablePointer<GtkGLArea>? = nil,
+                         widget: UnsafeMutablePointer<GtkWidget>? = nil,
                          command: String? = nil, workingDirectory: String? = nil,
                          title: String? = nil) -> Int {
         let id = workspaces.count + 1
         var ws = Workspace(id: id)
         if let title = title { ws.title = "\(id): \(title)" }
 
-        // Create ghostty surface for this workspace
-        if ghosttyApp.createSurface(glArea: glArea, widget: widget,
-                                     command: command, workingDirectory: workingDirectory) {
-            ws.surface = ghosttyApp.surface
-            ws.contentWidget = widget  // Track the GL area widget
-            // Register in pane manager for surface lookup
-            paneManager.registerSurface(glArea: glArea, surface: ghosttyApp.surface!)
+        // Create a NEW GtkGLArea for this workspace
+        guard let newGlArea = gtk_gl_area_new() else { return 0 }
+        gtk_widget_set_hexpand(newGlArea, 1)
+        gtk_widget_set_vexpand(newGlArea, 1)
+        gtk_widget_set_focusable(newGlArea, 1)
+        gtk_widget_set_can_focus(newGlArea, 1)
+        let newGlPtr = unsafeBitCast(newGlArea, to: UnsafeMutablePointer<GtkGLArea>.self)
+        gtk_gl_area_set_auto_render(newGlPtr, 1)
+
+        ws.contentWidget = newGlArea
+        ws.glArea = newGlPtr
+
+        // Store creation params for the realize callback
+        let wsIndex = workspaces.count  // Index this workspace will have
+        paneManager.setCwd(glArea: newGlPtr, cwd: workingDirectory ?? "")
+
+        // Render callback for this workspace's GL area
+        let renderCb: @convention(c) (UnsafeMutablePointer<GtkGLArea>?, OpaquePointer?, gpointer?) -> gboolean = { glArea, ctx, _ in
+            if let surface = paneManager.surfaceForGLArea(glArea),
+               let gApp = getGhosttyApp() {
+                gApp.drawSurface(surface)
+            }
+            return 1
+        }
+        g_signal_connect_data(newGlArea, "render",
+            unsafeBitCast(renderCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
+
+        // Realize callback — create ghostty surface when GL is ready
+        let realizeCb: @convention(c) (UnsafeMutablePointer<GtkWidget>?, gpointer?) -> Void = { widget, _ in
+            guard let widget = widget, let gApp = getGhosttyApp() else { return }
+            let glPtr = unsafeBitCast(widget, to: UnsafeMutablePointer<GtkGLArea>.self)
+            gtk_gl_area_make_current(glPtr)
+
+            let cwd = paneManager.getCwd(glArea: glPtr)
+            if gApp.createSurface(glArea: glPtr, widget: widget, workingDirectory: cwd) {
+                paneManager.registerSurface(glArea: glPtr, surface: gApp.surface!)
+                // Find and update the workspace that owns this GL area
+                for i in 0..<workspaceManager.workspaces.count {
+                    if workspaceManager.workspaces[i].glArea == glPtr {
+                        workspaceManager.workspaces[i].surface = gApp.surface
+                        break
+                    }
+                }
+                let w = gtk_widget_get_width(widget)
+                let h = gtk_widget_get_height(widget)
+                if w > 0 && h > 0 {
+                    gApp.fn_surface_set_size?(gApp.surface!, UInt32(w), UInt32(h))
+                }
+                gApp.fn_surface_set_focus?(gApp.surface!, true)
+                let scale = Double(gtk_widget_get_scale_factor(widget))
+                gApp.fn_surface_set_content_scale?(gApp.surface!, scale, scale)
+                _ = gtk_widget_grab_focus(widget)
+                cmuxLog("[workspace] Surface realized for GL area")
+            }
+        }
+        g_signal_connect_data(newGlArea, "realize",
+            unsafeBitCast(realizeCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
+
+        // Resize callback
+        let resizeCb: @convention(c) (UnsafeMutablePointer<GtkGLArea>?, Int32, Int32, gpointer?) -> Void = { glArea, w, h, _ in
+            if let surface = paneManager.surfaceForGLArea(glArea),
+               let gApp = getGhosttyApp(), w > 0, h > 0 {
+                gApp.fn_surface_set_size?(surface, UInt32(w), UInt32(h))
+            }
+        }
+        g_signal_connect_data(newGlArea, "resize",
+            unsafeBitCast(resizeCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
+
+        // Add to GtkStack
+        if let stack = stack {
+            let stackName = "ws-\(id)"
+            stackName.withCString { cName in
+                gtk_stack_add_named(stack, newGlArea, cName)
+            }
         }
 
         workspaces.append(ws)
         activeIndex = workspaces.count - 1
 
+        // Show this workspace in the stack
+        showActiveInStack()
+
         updateSidebar()
         cmuxLog("[workspace] Created workspace \(id), total=\(workspaces.count)")
         return id
+    }
+
+    /// Show the active workspace's GL area in the stack
+    func showActiveInStack() {
+        guard let stack = stack else { return }
+        guard let ws = activeWorkspace else { return }
+        let stackName = "ws-\(ws.id)"
+        stackName.withCString { cName in
+            gtk_stack_set_visible_child_name(stack, cName)
+        }
+        // Focus the GL area
+        if let glArea = ws.glArea {
+            let widget = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
+            _ = gtk_widget_grab_focus(widget)
+        }
     }
 
     /// Switch to workspace at index
@@ -82,26 +170,13 @@ final class WorkspaceManager {
         activeIndex = index
         clearUnread(index: index)
 
-        // Focus new surface and force full redraw
+        // Focus new surface
         if let newSurface = activeSurface {
             ghosttyApp?.setFocusOnSurface(newSurface, focused: true)
-            // Force the surface to re-render its full content
-            ghosttyApp?.fn_surface_refresh?(newSurface)
-            // Update size to trigger re-layout
-            if let gl = glArea {
-                let widget = unsafeBitCast(gl, to: UnsafeMutablePointer<GtkWidget>.self)
-                let w = gtk_widget_get_width(widget)
-                let h = gtk_widget_get_height(widget)
-                if w > 0 && h > 0 {
-                    ghosttyApp?.fn_surface_set_size?(newSurface, UInt32(w), UInt32(h))
-                }
-            }
         }
 
-        // Queue a GL render
-        if let gl = glArea {
-            gtk_gl_area_queue_render(gl)
-        }
+        // Switch visible child in GtkStack
+        showActiveInStack()
 
         updateSidebar()
         updateWindowTitle()

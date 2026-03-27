@@ -60,91 +60,38 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
     workspaceManager.contentBoxWidget = contentBox
 
     if let gApp = ghosttyApp {
-        // GtkGLArea for terminal rendering
-        guard let glArea = gtk_gl_area_new() else { return }
-        gtk_widget_set_hexpand(glArea, 1)
-        gtk_widget_set_vexpand(glArea, 1)
-        gtk_widget_set_focusable(glArea, 1)  // Allow GL area to receive keyboard focus
-        gtk_widget_set_can_focus(glArea, 1)
-        let glAreaPtr = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkGLArea>.self)
-        gtk_gl_area_set_auto_render(glAreaPtr, 1)
+        // GtkStack holds one GtkGLArea per workspace
+        guard let stack = gtk_stack_new() else { return }
+        gtk_widget_set_hexpand(stack, 1)
+        gtk_widget_set_vexpand(stack, 1)
+        gtk_stack_set_transition_type(OpaquePointer(stack), GTK_STACK_TRANSITION_TYPE_NONE)
+        workspaceManager.stack = OpaquePointer(stack)
 
-        // Render callback — draw the ACTIVE workspace's surface
-        let renderCb: @convention(c) (UnsafeMutablePointer<GtkGLArea>?, OpaquePointer?, gpointer?) -> gboolean = { glArea, ctx, _ in
-            if let surface = workspaceManager.activeSurface, let gApp = ghosttyApp {
-                gApp.drawSurface(surface)
+        // Create initial workspace (adds its own GtkGLArea to the stack)
+        cmuxLog("[cmux] Creating initial workspace...")
+        let wsId = workspaceManager.createWorkspace(
+            ghosttyApp: gApp,
+            command: initialCommand, workingDirectory: initialDirectory,
+            title: initialTitle)
+        cmuxLog("[cmux] Workspace \(wsId) created")
+
+        // Restore additional workspaces from saved session
+        if let saved = LinuxSessionPersistence.load(), saved.workspaces.count > 1 {
+            for i in 1..<saved.workspaces.count {
+                let ws = saved.workspaces[i]
+                let home = ProcessInfo.processInfo.environment["HOME"] ?? ""
+                let fullCwd = ws.cwd.hasPrefix("~")
+                    ? home + String(ws.cwd.dropFirst(1)) : ws.cwd
+                _ = workspaceManager.createWorkspace(
+                    ghosttyApp: gApp, workingDirectory: fullCwd)
             }
-            return 1
-        }
-        g_signal_connect_data(glArea, "render",
-            unsafeBitCast(renderCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
-
-        // Realize callback — create surface when GL is ready
-        let realizeCb: @convention(c) (UnsafeMutablePointer<GtkWidget>?, gpointer?) -> Void = { widget, _ in
-            guard let widget = widget, let gApp = ghosttyApp else { return }
-            let glPtr = unsafeBitCast(widget, to: UnsafeMutablePointer<GtkGLArea>.self)
-            gtk_gl_area_make_current(glPtr)
-
-            // Make GL context current BEFORE creating surface —
-            // the OpenGL renderer needs it during initialization
-            gtk_gl_area_make_current(glPtr)
-            cmuxLog("[cmux] GL context current, creating initial workspace...")
-            workspaceManager.glArea = glPtr
-            let wsId = workspaceManager.createWorkspace(
-                ghosttyApp: gApp, glArea: glPtr, widget: widget,
-                command: initialCommand, workingDirectory: initialDirectory,
-                title: initialTitle)
-            if wsId > 0 {
-                let w = gtk_widget_get_width(widget)
-                let h = gtk_widget_get_height(widget)
-                if w > 0 && h > 0 {
-                    gApp.setSize(UInt32(w), UInt32(h))
-                }
-                gApp.setFocus(true)
-                let scale = Double(gtk_widget_get_scale_factor(widget))
-                gApp.setContentScale(scale, scale)
-                _ = gtk_widget_grab_focus(widget)
-                cmuxLog("[cmux] Workspace \(wsId) ready: \(w)x\(h) @\(scale)x")
-
-                // Restore additional workspaces from saved session
-                if let saved = LinuxSessionPersistence.load(), saved.workspaces.count > 1 {
-                    for i in 1..<saved.workspaces.count {
-                        let ws = saved.workspaces[i]
-                        let home = ProcessInfo.processInfo.environment["HOME"] ?? ""
-                        let fullCwd = ws.cwd.hasPrefix("~")
-                            ? home + ws.cwd.dropFirst(1) : ws.cwd
-                        _ = workspaceManager.createWorkspace(
-                            ghosttyApp: gApp, glArea: glPtr, widget: widget,
-                            workingDirectory: fullCwd)
-                    }
-                    // Switch to the previously active workspace
-                    if saved.activeIndex < workspaceManager.workspaces.count {
-                        workspaceManager.switchTo(index: saved.activeIndex)
-                    }
-                    cmuxLog("[cmux] Restored \(saved.workspaces.count) workspaces")
-                }
+            if saved.activeIndex < workspaceManager.workspaces.count {
+                workspaceManager.switchTo(index: saved.activeIndex)
             }
+            cmuxLog("[cmux] Restored \(saved.workspaces.count) workspaces")
         }
-        g_signal_connect_data(glArea, "realize",
-            unsafeBitCast(realizeCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
 
-        // Resize callback
-        let resizeCb: @convention(c) (UnsafeMutablePointer<GtkGLArea>?, Int32, Int32, gpointer?) -> Void = { glArea, w, h, _ in
-            if let gApp = ghosttyApp, w > 0, h > 0 {
-                gApp.setSize(UInt32(w), UInt32(h))
-                // Update content scale on resize too
-                if let glArea = glArea {
-                    let widget = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
-                    let scale = Double(gtk_widget_get_scale_factor(widget))
-                    gApp.setContentScale(scale, scale)
-                }
-                cmuxLog("[cmux] Resized: \(w)x\(h)")
-            }
-        }
-        g_signal_connect_data(glArea, "resize",
-            unsafeBitCast(resizeCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
-
-        gtk_box_append(contentBox, glArea)
+        gtk_box_append(contentBox, stack)
 
         // Tick timer — process ghostty events on main thread
         g_timeout_add(16, { _ -> gboolean in ghosttyApp?.tick(); return 1 }, nil)
