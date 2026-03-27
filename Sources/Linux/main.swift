@@ -217,6 +217,16 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
                     workspaceManager.closeActive()
                     return 1
                 }
+                // Ctrl+Shift+F: search/find in terminal
+                if keyval == UInt32(GDK_KEY_f) || keyval == UInt32(GDK_KEY_F) {
+                    gApp.bindingAction("search")
+                    return 1
+                }
+                // Ctrl+Shift+,: reload config
+                if keyval == UInt32(GDK_KEY_comma) || keyval == UInt32(GDK_KEY_less) {
+                    gApp.bindingAction("open_config")
+                    return 1
+                }
             }
 
             // === Super (Cmd) combos — cmux-specific, never conflicts with shell ===
@@ -258,9 +268,35 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
                     workspaceManager.closeActive()
                     return 1
                 }
+                // Super+K: clear scrollback
+                if keyval == UInt32(GDK_KEY_k) || keyval == UInt32(GDK_KEY_K) {
+                    gApp.bindingAction("clear_screen")
+                    return 1
+                }
                 // Super+B: toggle sidebar
                 if keyval == UInt32(GDK_KEY_b) || keyval == UInt32(GDK_KEY_B) {
                     workspaceManager.toggleSidebar()
+                    return 1
+                }
+            }
+
+
+            // === Scrollback: Shift+PageUp/Down/Home/End ===
+            if isShift && !isCtrl && !isSuper {
+                if keyval == UInt32(GDK_KEY_Page_Up) {
+                    gApp.bindingAction("scroll_page_up")
+                    return 1
+                }
+                if keyval == UInt32(GDK_KEY_Page_Down) {
+                    gApp.bindingAction("scroll_page_down")
+                    return 1
+                }
+                if keyval == UInt32(GDK_KEY_Home) {
+                    gApp.bindingAction("scroll_to_top")
+                    return 1
+                }
+                if keyval == UInt32(GDK_KEY_End) {
+                    gApp.bindingAction("scroll_to_bottom")
                     return 1
                 }
             }
