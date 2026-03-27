@@ -73,19 +73,50 @@ Swift (GTK4 + GtkGLArea) → libghostty.so (dlopen) → OpenGL 4.6 → Terminal
 
 This project uses a [modified Ghostty](https://github.com/ianblenke/ghostty/tree/linux-embedded-platform) with `GHOSTTY_PLATFORM_LINUX` added to the embedded API, enabling host applications to embed Ghostty terminal surfaces in GtkGLArea widgets.
 
+## CLI
+
+Install the CLI for remote control:
+```bash
+ln -sf "$(pwd)/scripts/cmux-cli.sh" ~/.local/bin/cmux
+```
+
+Control cmux from any terminal:
+```bash
+cmux list                           # List workspaces
+cmux new /path/to/project "name"    # Create workspace
+cmux select 2                       # Switch to workspace
+cmux notify "Agent" "Build done"    # Send notification
+cmux identify                       # Show app info
+```
+
+AI agents can use the socket directly:
+```bash
+SOCK=$(cat /tmp/cmux-socket-path)
+echo '{"method":"workspace.create","params":{"directory":"/project"}}' \
+  | socat - UNIX-CONNECT:$SOCK
+```
+
 ## Status
 
 Working:
-- Terminal rendering with GPU acceleration
+- GPU-accelerated terminal rendering (OpenGL 4.6)
+- Ghostty config (themes, fonts from ~/.config/ghostty/config)
 - Full keyboard input with modifier keys
 - Mouse (click, motion, scroll)
-- Clipboard (copy + paste)
-- Multiple workspaces with sidebar
-- Dynamic workspace titles from shell
+- Clipboard (Ctrl+Shift+C/V)
+- Multiple workspaces (Super+T/W/1-9)
+- Split panes (Super+D, Ctrl+Shift+D)
+- CWD inheritance on split
+- Dynamic window/sidebar titles from shell
+- Bell notifications with sidebar indicators
+- Font size adjustment (Ctrl+Plus/Minus/0)
+- Session persistence (save/restore on exit/launch)
+- Socket control API (9 JSON-RPC commands)
+- CLI wrapper (cmux list/new/select/notify)
 - HiDPI support
+- Command-line args (-e, -d, --title)
 
 In progress:
-- Split panes within workspaces
-- Ghostty config theming
-- Notification system
-- Socket control API
+- Browser panels (WebKitGTK)
+- Shell integration hooks
+- Linux packaging (AppImage/Flatpak)
