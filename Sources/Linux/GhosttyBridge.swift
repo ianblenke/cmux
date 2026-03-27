@@ -91,7 +91,7 @@ final class GhosttyApp {
     var fn_surface_set_size: (@convention(c) (UnsafeMutableRawPointer?, UInt32, UInt32) -> Void)?
     var fn_surface_set_focus: (@convention(c) (UnsafeMutableRawPointer?, Bool) -> Void)?
     var fn_surface_set_content_scale: (@convention(c) (UnsafeMutableRawPointer?, Double, Double) -> Void)?
-    private var fn_surface_refresh: (@convention(c) (UnsafeMutableRawPointer?) -> Void)?
+    var fn_surface_refresh: (@convention(c) (UnsafeMutableRawPointer?) -> Void)?
     private var fn_surface_key: (@convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Bool)?
     private var fn_surface_text: (@convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UInt) -> Void)?
     private var fn_surface_mouse_button: (@convention(c) (UnsafeMutableRawPointer?, Int32, Int32, Int32) -> Bool)?

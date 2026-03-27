@@ -82,12 +82,23 @@ final class WorkspaceManager {
         activeIndex = index
         clearUnread(index: index)
 
-        // Focus new surface
+        // Focus new surface and force full redraw
         if let newSurface = activeSurface {
             ghosttyApp?.setFocusOnSurface(newSurface, focused: true)
+            // Force the surface to re-render its full content
+            ghosttyApp?.fn_surface_refresh?(newSurface)
+            // Update size to trigger re-layout
+            if let gl = glArea {
+                let widget = unsafeBitCast(gl, to: UnsafeMutablePointer<GtkWidget>.self)
+                let w = gtk_widget_get_width(widget)
+                let h = gtk_widget_get_height(widget)
+                if w > 0 && h > 0 {
+                    ghosttyApp?.fn_surface_set_size?(newSurface, UInt32(w), UInt32(h))
+                }
+            }
         }
 
-        // Queue a render
+        // Queue a GL render
         if let gl = glArea {
             gtk_gl_area_queue_render(gl)
         }
