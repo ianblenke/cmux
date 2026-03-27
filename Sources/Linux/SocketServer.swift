@@ -208,28 +208,27 @@ class SocketControlServer {
         case "workspace.create":
             // Schedule workspace creation on GTK main thread
             let dir = request.params?["directory"]
-            let title = request.params?["title"]
-            pendingSocketAction = {
-                if let gApp = getGhosttyApp(), let gl = workspaceManager.glArea {
-                    let w = unsafeBitCast(gl, to: UnsafeMutablePointer<GtkWidget>.self)
-                    gtk_gl_area_make_current(gl)
-                    _ = workspaceManager.createWorkspace(
-                        ghosttyApp: gApp, glArea: gl, widget: w,
-                        workingDirectory: dir, title: title)
-                }
-            }
+            pendingCreateDir = request.params?["directory"]
+            pendingCreateTitle = request.params?["title"]
             g_idle_add({ _ -> gboolean in
-                pendingSocketAction?()
-                pendingSocketAction = nil
+                if let gApp = getGhosttyApp() {
+                    _ = workspaceManager.createWorkspace(
+                        ghosttyApp: gApp,
+                        workingDirectory: pendingCreateDir,
+                        title: pendingCreateTitle)
+                }
+                pendingCreateDir = nil
+                pendingCreateTitle = nil
                 return 0
             }, nil)
             return successResponse(id: id, result: ["ok": "true"])
 
         case "workspace.select":
             if let indexStr = request.params?["index"], let index = Int(indexStr) {
-                pendingSocketAction = { workspaceManager.switchTo(index: index - 1) }
+                pendingSelectIndex = index - 1
                 g_idle_add({ _ -> gboolean in
-                    pendingSocketAction?(); pendingSocketAction = nil; return 0
+                    workspaceManager.switchTo(index: pendingSelectIndex)
+                    return 0
                 }, nil)
                 return successResponse(id: id, result: ["ok": "true"])
             }
@@ -372,3 +371,7 @@ class SocketControlServer {
 var socketServer: SocketControlServer?
 /// Pending action to execute on GTK main thread
 var pendingSocketAction: (() -> Void)?
+/// Stored params for workspace creation (closures can't capture in @convention(c))
+var pendingCreateDir: String?
+var pendingCreateTitle: String?
+var pendingSelectIndex: Int = 0
