@@ -408,6 +408,11 @@ do {
 setenv("GDK_DISABLE", "gles-api,vulkan", 1)
 cmuxLog("cmux starting...")
 
+// Start socket control server for CLI automation
+socketServer = SocketControlServer()
+socketServer?.start()
+cmuxLog("Socket server: \(socketServer?.socketPath ?? "none")")
+
 guard let app = gtk_application_new("com.cmux.linux", G_APPLICATION_NON_UNIQUE) else {
     fatalError("Failed to create GtkApplication")
 }
@@ -423,5 +428,6 @@ let status = argv.withUnsafeMutableBufferPointer { buf in
     g_application_run(gapp, 1, buf.baseAddress)
 }
 free(progName)
+socketServer?.stop()
 g_object_unref(app)
 exit(status)
