@@ -104,10 +104,13 @@ final class GhosttyApp {
         // Resolve library path relative to the executable
         let execDir = ProcessInfo.processInfo.arguments[0]
             .split(separator: "/").dropLast().joined(separator: "/")
+        // Search for libghostty in standard locations
+        let home = ProcessInfo.processInfo.environment["HOME"] ?? ""
         let paths = [
-            "/home/ianblenke/github.com/ianblenke/cmux/ghostty/zig-out/lib/libghostty.so",
-            "ghostty/zig-out/lib/libghostty.so",
-            "libghostty.so",
+            "\(home)/.local/share/cmux/libghostty.so",          // Installed location
+            "ghostty/zig-out/lib/libghostty.so",                 // Build directory (relative)
+            "/usr/local/lib/libghostty.so",                      // System-wide
+            "libghostty.so",                                     // LD_LIBRARY_PATH
         ]
         for path in paths {
             handle = dlopen(path, RTLD_NOW)
@@ -296,9 +299,13 @@ final class GhosttyApp {
         let integKey = strdup("CMUX_SHELL_INTEGRATION")!
         let integVal = strdup("1")!
         let integDirKey = strdup("CMUX_SHELL_INTEGRATION_DIR")!
-        // Resolve path to shell integration scripts
-        let projectDir = ProcessInfo.processInfo.environment["PWD"] ?? "/home/ianblenke/github.com/ianblenke/cmux"
-        let integDirVal = strdup("\(projectDir)/Resources/shell-integration")!
+        // Resolve path to shell integration scripts — check installed then project
+        let home2 = ProcessInfo.processInfo.environment["HOME"] ?? ""
+        let installedDir = "\(home2)/.local/share/cmux/shell-integration"
+        let projectDir = ProcessInfo.processInfo.environment["PWD"] ?? "."
+        let integDir = FileManager.default.fileExists(atPath: installedDir)
+            ? installedDir : "\(projectDir)/Resources/shell-integration"
+        let integDirVal = strdup(integDir)!
         defer { free(envKey); free(envVal); free(integKey); free(integVal); free(integDirKey); free(integDirVal) }
 
         // Build env vars array: [{key, value}, ...]
