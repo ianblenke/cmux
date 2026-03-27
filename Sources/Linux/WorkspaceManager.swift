@@ -159,28 +159,20 @@ final class WorkspaceManager {
         // Focus and resize the newly visible workspace
         if let ws = activeWorkspace, let glArea = ws.glArea {
             let glWidget = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
-            _ = gtk_widget_grab_focus(glWidget)
-
-            // Ensure GL context is current for this workspace
-            gtk_gl_area_make_current(glArea)
 
             if let surface = ws.surface, let gApp = getGhosttyApp() {
-                // Unfocus all, focus active
-                for w in workspaces {
-                    if let s = w.surface { gApp.fn_surface_set_focus?(s, false) }
-                }
+                // Just focus the new surface — don't unfocus others (causes flicker)
                 gApp.fn_surface_set_focus?(surface, true)
                 // Re-apply size (may have changed while hidden)
                 let w = gtk_widget_get_width(glWidget)
                 let h = gtk_widget_get_height(glWidget)
                 if w > 0 && h > 0 {
                     gApp.fn_surface_set_size?(surface, UInt32(w), UInt32(h))
-                    let scale = Double(gtk_widget_get_scale_factor(glWidget))
-                    gApp.fn_surface_set_content_scale?(surface, scale, scale)
                 }
-                gApp.fn_surface_refresh?(surface)
                 gtk_gl_area_queue_render(glArea)
             }
+
+            _ = gtk_widget_grab_focus(glWidget)
         }
     }
 
