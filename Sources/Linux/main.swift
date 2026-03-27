@@ -100,17 +100,8 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
             ghosttyApp?.tick()
             if let ws = workspaceManager.activeWorkspace, let glArea = ws.glArea,
                let surface = ws.surface, let gApp = getGhosttyApp() {
-                // Apply resize only after 200ms of no resize events
-                if pendingResizeW > 0 && pendingResizeH > 0 {
-                    let now = DispatchTime.now().uptimeNanoseconds
-                    let elapsed = now - lastResizeTime
-                    if elapsed > 200_000_000 {  // 200ms
-                        gApp.fn_surface_set_size?(surface, UInt32(pendingResizeW), UInt32(pendingResizeH))
-                        gApp.fn_surface_refresh?(surface)
-                        pendingResizeW = 0
-                        pendingResizeH = 0
-                    }
-                }
+                // Ensure GL context is current before any surface operations
+                gtk_gl_area_make_current(glArea)
                 gApp.fn_surface_set_focus?(surface, true)
                 gtk_gl_area_queue_render(glArea)
             }
