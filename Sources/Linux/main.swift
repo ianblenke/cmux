@@ -37,10 +37,13 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
     gtk_widget_set_size_request(sidebar, 220, -1)
     let sidebarBox = unsafeBitCast(sidebar, to: UnsafeMutablePointer<GtkBox>.self)
     workspaceManager.sidebarBox = sidebarBox
+    workspaceManager.sidebarWidget = sidebar
     workspaceManager.window = win
     gtk_box_append(sidebarBox, gtk_label_new("Workspaces"))
     gtk_box_append(hboxPtr, sidebar)
-    gtk_box_append(hboxPtr, gtk_separator_new(GTK_ORIENTATION_VERTICAL))
+    let sep = gtk_separator_new(GTK_ORIENTATION_VERTICAL)
+    workspaceManager.separatorWidget = sep
+    gtk_box_append(hboxPtr, sep)
 
     // Content
     guard let content = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0) else { return }
@@ -253,6 +256,11 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
                 // Super+W: close workspace
                 if keyval == UInt32(GDK_KEY_w) || keyval == UInt32(GDK_KEY_W) {
                     workspaceManager.closeActive()
+                    return 1
+                }
+                // Super+B: toggle sidebar
+                if keyval == UInt32(GDK_KEY_b) || keyval == UInt32(GDK_KEY_B) {
+                    workspaceManager.toggleSidebar()
                     return 1
                 }
             }

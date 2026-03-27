@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=cmux
+Comment=Ghostty-based terminal with workspaces for AI coding agents
+Exec=cmux-linux
+Icon=utilities-terminal
+Terminal=false
+Type=Application
+Categories=System;TerminalEmulator;
+Keywords=terminal;console;shell;ghostty;
+StartupNotify=true

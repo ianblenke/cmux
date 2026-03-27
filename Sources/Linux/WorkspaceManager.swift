@@ -277,6 +277,21 @@ final class WorkspaceManager {
         switchTo(index: prevIdx)
     }
 
+    var sidebarVisible = true
+    var sidebarWidget: UnsafeMutablePointer<GtkWidget>?
+    var separatorWidget: UnsafeMutablePointer<GtkWidget>?
+
+    /// Toggle sidebar visibility
+    func toggleSidebar() {
+        sidebarVisible = !sidebarVisible
+        if let sidebar = sidebarWidget {
+            gtk_widget_set_visible(sidebar, sidebarVisible ? 1 : 0)
+        }
+        if let sep = separatorWidget {
+            gtk_widget_set_visible(sep, sidebarVisible ? 1 : 0)
+        }
+    }
+
     /// Update the window title to show active workspace info
     func updateWindowTitle() {
         guard let win = window else { return }
