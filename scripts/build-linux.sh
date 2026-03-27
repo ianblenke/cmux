@@ -10,12 +10,23 @@ cd "$PROJECT_DIR"
 RUN=0
 RELEASE=0
 REBUILD_GHOSTTY=0
+INSTALL=0
 for arg in "$@"; do
     case "$arg" in
         --run) RUN=1 ;;
         --release) RELEASE=1 ;;
         --rebuild-ghostty) REBUILD_GHOSTTY=1 ;;
-        --help|-h) echo "Usage: $0 [--run] [--release] [--rebuild-ghostty]"; exit 0 ;;
+        --install) INSTALL=1; RELEASE=1 ;;
+        --help|-h)
+            echo "Usage: $0 [--run] [--release] [--install] [--rebuild-ghostty]"
+            echo ""
+            echo "Options:"
+            echo "  --run              Build and launch"
+            echo "  --release          Build optimized release binary"
+            echo "  --install          Build release and install to ~/.local/bin"
+            echo "  --rebuild-ghostty  Force rebuild libghostty"
+            exit 0
+            ;;
     esac
 done
 
@@ -93,6 +104,48 @@ fi
 echo ""
 echo "=== Build complete ==="
 echo "Binary: $BINARY ($(ls -lh "$BINARY" | awk '{print $5}'))"
+
+if [ "$INSTALL" = "1" ]; then
+    echo ""
+    echo "=== Installing cmux ==="
+    INSTALL_DIR="${HOME}/.local/bin"
+    SHARE_DIR="${HOME}/.local/share"
+    mkdir -p "$INSTALL_DIR" "$SHARE_DIR/applications" "$SHARE_DIR/cmux"
+
+    # Binary
+    cp "$BINARY" "$INSTALL_DIR/cmux-linux"
+    echo "  Binary: $INSTALL_DIR/cmux-linux"
+
+    # CLI (remove symlink if exists, then copy)
+    rm -f "$INSTALL_DIR/cmux" 2>/dev/null || true
+    cp "$PROJECT_DIR/scripts/cmux-cli.sh" "$INSTALL_DIR/cmux"
+    chmod +x "$INSTALL_DIR/cmux"
+    echo "  CLI: $INSTALL_DIR/cmux"
+
+    # libghostty.so
+    cp "$PROJECT_DIR/ghostty/zig-out/lib/libghostty.so" "$SHARE_DIR/cmux/"
+    echo "  Library: $SHARE_DIR/cmux/libghostty.so"
+
+    # Shell integration
+    cp -r "$PROJECT_DIR/Resources/shell-integration" "$SHARE_DIR/cmux/"
+    echo "  Shell integration: $SHARE_DIR/cmux/shell-integration/"
+
+    # Desktop entry
+    sed "s|Exec=cmux-linux|Exec=$INSTALL_DIR/cmux-linux|" \
+        "$PROJECT_DIR/cmux.desktop" > "$SHARE_DIR/applications/cmux.desktop"
+    echo "  Desktop: $SHARE_DIR/applications/cmux.desktop"
+
+    # Shell integration installer
+    "$PROJECT_DIR/scripts/install-shell-integration.sh" 2>/dev/null || true
+
+    echo ""
+    echo "=== Installation complete ==="
+    echo "Run: cmux-linux"
+    echo "CLI: cmux list / cmux notify / cmux help"
+    echo ""
+    echo "Make sure ~/.local/bin is in your PATH:"
+    echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+fi
 
 if [ "$RUN" = "1" ]; then
     echo ""
