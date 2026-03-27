@@ -288,6 +288,37 @@ final class GhosttyApp {
             buf.storeBytes(of: Double(1.0), toByteOffset: 32, as: Double.self) // scale_factor
         }
 
+        // Set CMUX_SOCKET_PATH env var so shell integration can find us
+        // ghostty_env_var_s is {const char* key, const char* value} (16 bytes)
+        let socketPath = socketServer?.socketPath ?? ""
+        let envKey = strdup("CMUX_SOCKET_PATH")!
+        let envVal = strdup(socketPath)!
+        let integKey = strdup("CMUX_SHELL_INTEGRATION")!
+        let integVal = strdup("1")!
+        let integDirKey = strdup("CMUX_SHELL_INTEGRATION_DIR")!
+        // Resolve path to shell integration scripts
+        let projectDir = ProcessInfo.processInfo.environment["PWD"] ?? "/home/ianblenke/github.com/ianblenke/cmux"
+        let integDirVal = strdup("\(projectDir)/Resources/shell-integration")!
+        defer { free(envKey); free(envVal); free(integKey); free(integVal); free(integDirKey); free(integDirVal) }
+
+        // Build env vars array: [{key, value}, ...]
+        var envVars = [UnsafeRawPointer?](repeating: nil, count: 6)
+        envVars[0] = UnsafeRawPointer(envKey)
+        envVars[1] = UnsafeRawPointer(envVal)
+        envVars[2] = UnsafeRawPointer(integKey)
+        envVars[3] = UnsafeRawPointer(integVal)
+        envVars[4] = UnsafeRawPointer(integDirKey)
+        envVars[5] = UnsafeRawPointer(integDirVal)
+
+        envVars.withUnsafeMutableBufferPointer { buf in
+            scfg.withUnsafeMutableBytes { scfgBuf in
+                // env_vars at offset 64 (pointer to array)
+                scfgBuf.storeBytes(of: buf.baseAddress!, toByteOffset: 64, as: UnsafeRawPointer.self)
+                // env_var_count at offset 72 (size_t)
+                scfgBuf.storeBytes(of: UInt(3), toByteOffset: 72, as: UInt.self)
+            }
+        }
+
         // Set working directory and command using strdup to keep strings alive
         var dirStr: UnsafeMutablePointer<CChar>? = nil
         var cmdStr: UnsafeMutablePointer<CChar>? = nil
