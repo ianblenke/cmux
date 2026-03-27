@@ -113,9 +113,17 @@ final class WorkspaceManager {
         g_signal_connect_data(newGlArea, "realize",
             unsafeBitCast(realizeCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
 
-        // Resize callback — disabled to test if set_size causes focus loss
+        // Resize callback
         let resizeCb: @convention(c) (UnsafeMutablePointer<GtkGLArea>?, Int32, Int32, gpointer?) -> Void = { glArea, w, h, _ in
-            // Do nothing — let ghostty handle its own size via the GL viewport
+            guard let glArea = glArea, w > 0, h > 0 else { return }
+            guard let surface = workspaceManager.activeWorkspace?.surface,
+                  let gApp = getGhosttyApp() else { return }
+            gApp.fn_surface_set_size?(surface, UInt32(w), UInt32(h))
+            // Unfocus all, then refocus active — same pattern as workspace switch
+            for ws in workspaceManager.workspaces {
+                if let s = ws.surface { gApp.fn_surface_set_focus?(s, false) }
+            }
+            gApp.fn_surface_set_focus?(surface, true)
         }
         g_signal_connect_data(newGlArea, "resize",
             unsafeBitCast(resizeCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
