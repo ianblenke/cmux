@@ -113,15 +113,16 @@ final class WorkspaceManager {
         g_signal_connect_data(newGlArea, "realize",
             unsafeBitCast(realizeCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
 
-        // Resize callback — only resize if this is the ACTIVE workspace's GL area
+        // Resize callback — only resize the active workspace, re-focus after
         let resizeCb: @convention(c) (UnsafeMutablePointer<GtkGLArea>?, Int32, Int32, gpointer?) -> Void = { glArea, w, h, _ in
             guard let glArea = glArea, w > 0, h > 0 else { return }
-            // Only resize the active workspace to avoid crashing hidden surfaces
             if let activeWs = workspaceManager.activeWorkspace,
                activeWs.glArea == glArea,
                let surface = paneManager.surfaceForGLArea(glArea),
                let gApp = getGhosttyApp() {
                 gApp.fn_surface_set_size?(surface, UInt32(w), UInt32(h))
+                // Re-focus after resize to restore keyboard input
+                gApp.fn_surface_set_focus?(surface, true)
             }
         }
         g_signal_connect_data(newGlArea, "resize",
