@@ -344,8 +344,13 @@ final class WorkspaceManager {
                 gtk_stack_add_named(stack, newWidget, cName)
             }
             workspaces[activeIndex].contentWidget = newWidget
-            workspaces[activeIndex].surface = pane1.surface
             showActiveInStack()
+
+            // The GL areas will realize asynchronously when shown.
+            // The realize callback in PaneManager creates the ghostty surface
+            // and registers it in paneManager.surfaceMap.
+            // The workspace surface will be updated by the realize callback.
+            cmuxLog("[split] Panes added to stack, waiting for realize...")
         }
 
         cmuxLog("[split] Split \(orientation == .horizontal ? "horizontal" : "vertical")")

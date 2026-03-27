@@ -118,6 +118,9 @@ func createTerminalPane(ghosttyApp: GhosttyApp, workingDirectory: String? = nil)
     g_signal_connect_data(glArea, "resize",
         unsafeBitCast(resizeCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
 
+    // Ensure the widget is visible (needed for realize to fire in containers)
+    gtk_widget_set_visible(glArea, 1)
+
     return pane
 }
 
