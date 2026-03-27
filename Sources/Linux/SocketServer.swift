@@ -257,11 +257,18 @@ class SocketControlServer {
             return successResponse(id: id, result: ["ok": "true"])
 
         case "surface.send_text":
-            if let text = request.params?["text"], let surface = workspaceManager.activeSurface {
-                getGhosttyApp()?.sendText(text)
+            if let text = request.params?["text"] {
+                pendingSendText = text
+                g_idle_add({ _ -> gboolean in
+                    if let t = pendingSendText {
+                        getGhosttyApp()?.sendText(t)
+                        pendingSendText = nil
+                    }
+                    return 0
+                }, nil)
                 return successResponse(id: id, result: ["ok": "true"])
             }
-            return errorResponse(id: id, code: -32602, message: "Missing 'text' parameter or no active surface")
+            return errorResponse(id: id, code: -32602, message: "Missing 'text' parameter")
 
         case "surface.send_key":
             if let key = request.params?["key"], let surface = workspaceManager.activeSurface {
@@ -401,3 +408,4 @@ var pendingSocketAction: (() -> Void)?
 var pendingCreateDir: String?
 var pendingCreateTitle: String?
 var pendingSelectIndex: Int = 0
+var pendingSendText: String?

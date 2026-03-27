@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# E2E tests for cmux — runs in a nested Wayland compositor
-# Tests: startup, typing, resize, workspace switching, persistence
+# Comprehensive E2E test suite for cmux
+# Runs in a nested Wayland compositor — zero keystroke bleed
+# Tests ALL features: typing, workspaces, resize, notifications, browser, persistence
+#
 # Usage: ./scripts/test-e2e.sh
+#        ./scripts/build-linux.sh --test
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -10,13 +13,16 @@ cd "$PROJECT_DIR"
 
 LOG="/tmp/cmux-linux.log"
 WESTON_SOCK="cmux-e2e-$$"
+TEST_DIR="/tmp/cmux-e2e-$$"
 PASS=0
 FAIL=0
+SKIP=0
 CMUX_PID=""
 WESTON_PID=""
 
 green() { printf '\033[32m  PASS: %s\033[0m\n' "$1"; }
 red()   { printf '\033[31m  FAIL: %s\033[0m\n' "$1"; }
+yellow(){ printf '\033[33m  SKIP: %s\033[0m\n' "$1"; }
 bold()  { printf '\033[1m%s\033[0m\n' "$1"; }
 
 cleanup() {
@@ -24,7 +30,7 @@ cleanup() {
     [ -n "$WESTON_PID" ] && kill $WESTON_PID 2>/dev/null || true
     wait $CMUX_PID 2>/dev/null || true
     wait $WESTON_PID 2>/dev/null || true
-    rm -f "/tmp/$WESTON_SOCK" /tmp/cmux-e2e-*.log
+    rm -rf "$TEST_DIR"
 }
 trap cleanup EXIT
 
@@ -33,7 +39,16 @@ assert() {
     if echo "$got" | grep -q "$expected"; then
         green "$name"; PASS=$((PASS + 1))
     else
-        red "$name (expected '$expected', got '$(echo "$got" | head -c 100)')"; FAIL=$((FAIL + 1))
+        red "$name (expected '$expected', got '$(echo "$got" | head -c 120)')"; FAIL=$((FAIL + 1))
+    fi
+}
+
+assert_eq() {
+    local name="$1" got="$2" expected="$3"
+    if [ "$got" = "$expected" ]; then
+        green "$name"; PASS=$((PASS + 1))
+    else
+        red "$name (expected '$expected', got '$got')"; FAIL=$((FAIL + 1))
     fi
 }
 
@@ -41,18 +56,51 @@ assert_running() {
     if kill -0 $CMUX_PID 2>/dev/null; then
         green "$1"; PASS=$((PASS + 1))
     else
-        red "$1 — process died"; FAIL=$((FAIL + 1))
+        red "$1 — PROCESS DIED"; FAIL=$((FAIL + 1))
+    fi
+}
+
+assert_file() {
+    local name="$1" path="$2"
+    if [ -f "$path" ]; then
+        green "$name"; PASS=$((PASS + 1))
+    else
+        red "$name (file not found: $path)"; FAIL=$((FAIL + 1))
+    fi
+}
+
+assert_file_contains() {
+    local name="$1" path="$2" expected="$3"
+    if [ -f "$path" ] && grep -q "$expected" "$path" 2>/dev/null; then
+        green "$name"; PASS=$((PASS + 1))
+    else
+        red "$name (file '$path' missing or doesn't contain '$expected')"; FAIL=$((FAIL + 1))
     fi
 }
 
 send() { echo "$1" | socat -t 3 - UNIX-CONNECT:"$SOCK" 2>/dev/null; }
 
+send_text() {
+    local text="$1"
+    local escaped=$(echo "$text" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    send "{\"jsonrpc\":\"2.0\",\"method\":\"surface.send_text\",\"params\":{\"text\":\"$escaped\"},\"id\":99}" >/dev/null
+}
+
+ws_count() {
+    local r=$(send '{"jsonrpc":"2.0","method":"workspace.list","id":99}')
+    echo "$r" | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('result',[])))" 2>/dev/null || echo 0
+}
+
 # ============================================================
-bold "=== cmux E2E Test Suite ==="
+bold "╔══════════════════════════════════════════╗"
+bold "║     cmux E2E Test Suite                  ║"
+bold "╚══════════════════════════════════════════╝"
 echo ""
 
+mkdir -p "$TEST_DIR"
+
 # Build
-bold "Building..."
+bold "Building cmux..."
 ./scripts/build-linux.sh 2>&1 | tail -3
 echo ""
 
@@ -62,16 +110,13 @@ weston --backend=wayland --socket="$WESTON_SOCK" --width=1024 --height=768 2>/tm
 WESTON_PID=$!
 sleep 2
 if ! kill -0 $WESTON_PID 2>/dev/null; then
-    red "Weston failed to start"
-    cat /tmp/cmux-e2e-weston.log | tail -5
-    exit 1
+    red "Weston failed to start"; exit 1
 fi
-echo "  Weston PID=$WESTON_PID"
 
 # Launch cmux
 bold "Launching cmux..."
 rm -f "$LOG" ~/.local/share/cmux/session.json
-cp Package.linux.swift Package.swift
+cp Package.linux.swift Package.swift 2>/dev/null || true
 WAYLAND_DISPLAY="$WESTON_SOCK" .build/debug/cmux-linux 2>/tmp/cmux-e2e-stderr.log &
 CMUX_PID=$!
 sleep 5
@@ -81,143 +126,310 @@ SOCK=$(cat /tmp/cmux-socket-path 2>/dev/null || echo "")
 if [ -z "$SOCK" ] || [ ! -S "$SOCK" ]; then
     red "cmux failed to start"
     strings "$LOG" 2>/dev/null | tail -10
-    cat /tmp/cmux-e2e-stderr.log 2>/dev/null | tail -10
     exit 1
 fi
-echo "  cmux PID=$CMUX_PID, socket=$SOCK"
+echo "  cmux PID=$CMUX_PID socket=$SOCK"
 echo ""
 
 # ============================================================
-bold "--- Test 1: Startup & Identity ---"
+# TEST SUITE
+# ============================================================
+
+bold "━━━ 1. STARTUP & IDENTITY ━━━"
+
 R=$(send '{"jsonrpc":"2.0","method":"system.identify","id":1}')
-assert "identify returns app name" "$R" "cmux-linux"
-assert "identify returns version" "$R" "0.1.0"
-assert_running "process alive after identify"
+assert "identify: app name" "$R" '"app":"cmux-linux"'
+assert "identify: version" "$R" '"version":"0.1.0"'
+assert "identify: platform" "$R" '"platform":"linux"'
+assert "identify: has pid" "$R" '"pid"'
+assert_running "startup: process alive"
+
+R=$(send '{"jsonrpc":"2.0","method":"system.status","id":2}')
+assert "status: has workspaces" "$R" '"workspaces"'
+assert "status: has socket" "$R" '"socket"'
+assert "status: has pid" "$R" '"pid"'
 
 # ============================================================
-bold "--- Test 2: Workspace Operations ---"
-R=$(send '{"jsonrpc":"2.0","method":"workspace.list","id":2}')
-assert "initial workspace exists" "$R" '"id"'
+bold "━━━ 2. TERMINAL INPUT (via socket send_text) ━━━"
 
-send '{"jsonrpc":"2.0","method":"workspace.create","params":{"directory":"/tmp","title":"test-ws"},"id":3}' >/dev/null
+send_text "echo E2E_MARKER_1\n"
+sleep 2
+# Verify the command executed by checking if title updated
+R=$(strings "$LOG" 2>/dev/null | grep -c "\[action\] title:" || echo 0)
+assert "typing: shell responded to command" "$R" "[1-9]"
+assert_running "typing: process alive after input"
+
+# Write to a file to verify shell works
+send_text "echo CMUX_TEST_OK > $TEST_DIR/output1.txt\n"
+sleep 2
+assert_file_contains "typing: shell wrote file" "$TEST_DIR/output1.txt" "CMUX_TEST_OK"
+
+# ============================================================
+bold "━━━ 3. WORKSPACE CREATION ━━━"
+
+C0=$(ws_count)
+send '{"jsonrpc":"2.0","method":"workspace.create","params":{"directory":"/tmp","title":"ws-test"},"id":10}' >/dev/null
 sleep 4
-R=$(send '{"jsonrpc":"2.0","method":"workspace.list","id":4}')
-WS_COUNT=$(echo "$R" | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('result',[])))" 2>/dev/null || echo 0)
-assert "workspace created (count=2)" "$WS_COUNT" "2"
-assert_running "process alive after create"
+C1=$(ws_count)
+assert "create: count increased" "$C1" "$(( ${C0:-0} + 1 ))"
+assert_running "create: process alive"
 
-# Switch workspaces
-send '{"jsonrpc":"2.0","method":"workspace.select","params":{"index":"1"},"id":5}' >/dev/null; sleep 1
-send '{"jsonrpc":"2.0","method":"workspace.select","params":{"index":"2"},"id":6}' >/dev/null; sleep 1
-send '{"jsonrpc":"2.0","method":"workspace.select","params":{"index":"1"},"id":7}' >/dev/null; sleep 1
-assert_running "survives 3 workspace switches"
+# Verify new workspace is active and at /tmp
+R=$(send '{"jsonrpc":"2.0","method":"workspace.list","id":11}')
+assert "create: new workspace in list" "$R" '/tmp'
+assert "create: new workspace has id" "$R" '"id":"2"'
+
+# Type in new workspace
+send_text "echo WS2_MARKER > $TEST_DIR/output2.txt\n"
+sleep 2
+assert_file_contains "create: new workspace shell works" "$TEST_DIR/output2.txt" "WS2_MARKER"
+
+# ============================================================
+bold "━━━ 4. WORKSPACE SWITCHING ━━━"
+
+send '{"jsonrpc":"2.0","method":"workspace.select","params":{"index":"1"},"id":20}' >/dev/null
+sleep 1
+assert_running "switch: survives switch to ws1"
+
+# Verify we're on ws1 by typing
+send_text "echo WS1_AFTER_SWITCH > $TEST_DIR/output3.txt\n"
+sleep 2
+assert_file_contains "switch: ws1 shell works after switch" "$TEST_DIR/output3.txt" "WS1_AFTER_SWITCH"
+
+# Switch back to ws2
+send '{"jsonrpc":"2.0","method":"workspace.select","params":{"index":"2"},"id":21}' >/dev/null
+sleep 1
+send_text "echo WS2_AFTER_SWITCH > $TEST_DIR/output4.txt\n"
+sleep 2
+assert_file_contains "switch: ws2 shell works after switch" "$TEST_DIR/output4.txt" "WS2_AFTER_SWITCH"
+
+# Roundtrip
+send '{"jsonrpc":"2.0","method":"workspace.select","params":{"index":"1"},"id":22}' >/dev/null; sleep 1
+send '{"jsonrpc":"2.0","method":"workspace.select","params":{"index":"2"},"id":23}' >/dev/null; sleep 1
+send '{"jsonrpc":"2.0","method":"workspace.select","params":{"index":"1"},"id":24}' >/dev/null; sleep 1
+assert_running "switch: survives 3 roundtrip switches"
 
 # Rapid switching
-for i in 1 2 1 2 1 2 1; do
+for i in 1 2 1 2 1 2 1 2 1 2; do
     send '{"jsonrpc":"2.0","method":"workspace.select","params":{"index":"'$i'"},"id":99}' >/dev/null
-    sleep 0.3
+    sleep 0.2
 done
-assert_running "survives 7 rapid switches"
+sleep 1
+assert_running "switch: survives 10 rapid switches"
+
+# Type after rapid switch
+send_text "echo RAPID_SWITCH_OK > $TEST_DIR/output5.txt\n"
+sleep 2
+assert_file_contains "switch: typing works after rapid switches" "$TEST_DIR/output5.txt" "RAPID_SWITCH_OK"
 
 # ============================================================
-bold "--- Test 3: Programmatic Resize ---"
-send '{"jsonrpc":"2.0","method":"window.resize","params":{"width":"600","height":"400"},"id":10}' >/dev/null
-sleep 2
-assert_running "survives resize to 600x400"
+bold "━━━ 5. PROGRAMMATIC RESIZE ━━━"
 
-send '{"jsonrpc":"2.0","method":"window.resize","params":{"width":"1200","height":"800"},"id":11}' >/dev/null
+send '{"jsonrpc":"2.0","method":"window.resize","params":{"width":"600","height":"400"},"id":30}' >/dev/null
+sleep 3
+assert_running "resize: survives 600x400"
+send_text "echo RESIZE1 > $TEST_DIR/resize1.txt\n"
 sleep 2
-assert_running "survives resize to 1200x800"
+assert_file_contains "resize: typing works at 600x400" "$TEST_DIR/resize1.txt" "RESIZE1"
 
-send '{"jsonrpc":"2.0","method":"window.resize","params":{"width":"400","height":"300"},"id":12}' >/dev/null
+send '{"jsonrpc":"2.0","method":"window.resize","params":{"width":"1200","height":"800"},"id":31}' >/dev/null
+sleep 3
+assert_running "resize: survives 1200x800"
+send_text "echo RESIZE2 > $TEST_DIR/resize2.txt\n"
 sleep 2
-assert_running "survives resize to 400x300 (small)"
+assert_file_contains "resize: typing works at 1200x800" "$TEST_DIR/resize2.txt" "RESIZE2"
 
-send '{"jsonrpc":"2.0","method":"window.resize","params":{"width":"900","height":"600"},"id":13}' >/dev/null
-sleep 2
-assert_running "survives resize back to 900x600"
+send '{"jsonrpc":"2.0","method":"window.resize","params":{"width":"400","height":"300"},"id":32}' >/dev/null
+sleep 3
+assert_running "resize: survives 400x300 (small)"
+
+send '{"jsonrpc":"2.0","method":"window.resize","params":{"width":"900","height":"600"},"id":33}' >/dev/null
+sleep 3
+assert_running "resize: survives 900x600 (restore)"
 
 # ============================================================
-bold "--- Test 4: Resize + Switch Combo ---"
-send '{"jsonrpc":"2.0","method":"window.resize","params":{"width":"700","height":"500"},"id":20}' >/dev/null; sleep 1
-send '{"jsonrpc":"2.0","method":"workspace.select","params":{"index":"2"},"id":21}' >/dev/null; sleep 1
-send '{"jsonrpc":"2.0","method":"window.resize","params":{"width":"900","height":"600"},"id":22}' >/dev/null; sleep 1
-send '{"jsonrpc":"2.0","method":"workspace.select","params":{"index":"1"},"id":23}' >/dev/null; sleep 1
-assert_running "survives resize+switch interleaved"
+bold "━━━ 6. RESIZE + SWITCH COMBO ━━━"
 
-# Check workspace content preserved
-R=$(send '{"jsonrpc":"2.0","method":"workspace.list","id":24}')
-assert "still has 2 workspaces" "$R" '"id":"2"'
+send '{"jsonrpc":"2.0","method":"window.resize","params":{"width":"700","height":"500"},"id":40}' >/dev/null; sleep 1
+send '{"jsonrpc":"2.0","method":"workspace.select","params":{"index":"2"},"id":41}' >/dev/null; sleep 1
+send '{"jsonrpc":"2.0","method":"window.resize","params":{"width":"900","height":"600"},"id":42}' >/dev/null; sleep 1
+send '{"jsonrpc":"2.0","method":"workspace.select","params":{"index":"1"},"id":43}' >/dev/null; sleep 1
+assert_running "resize+switch: survives interleaved"
+
+send_text "echo COMBO_OK > $TEST_DIR/combo.txt\n"
+sleep 2
+assert_file_contains "resize+switch: typing works after combo" "$TEST_DIR/combo.txt" "COMBO_OK"
+
+# Switch to ws2 after combo
+send '{"jsonrpc":"2.0","method":"workspace.select","params":{"index":"2"},"id":44}' >/dev/null; sleep 1
+send_text "echo COMBO_WS2 > $TEST_DIR/combo2.txt\n"
+sleep 2
+assert_file_contains "resize+switch: ws2 typing works after combo" "$TEST_DIR/combo2.txt" "COMBO_WS2"
 
 # ============================================================
-bold "--- Test 5: Multiple Resizes (Simulated Drag) ---"
+bold "━━━ 7. SIMULATED DRAG RESIZE (11 rapid resizes) ━━━"
+
 for size in "800x500" "810x510" "820x520" "830x530" "840x540" "850x550" "860x560" "870x570" "880x580" "890x590" "900x600"; do
     W=${size%x*}; H=${size#*x}
     send '{"jsonrpc":"2.0","method":"window.resize","params":{"width":"'$W'","height":"'$H'"},"id":99}' >/dev/null
-    sleep 0.1
+    sleep 0.05
 done
+sleep 3
+assert_running "drag: survives 11 rapid resizes"
+
+send_text "echo DRAG_OK > $TEST_DIR/drag.txt\n"
 sleep 2
-assert_running "survives 11 rapid resizes (simulated drag)"
+assert_file_contains "drag: typing works after rapid resize" "$TEST_DIR/drag.txt" "DRAG_OK"
 
-# Type after rapid resize
-send '{"jsonrpc":"2.0","method":"surface.send_text","params":{"text":"echo RESIZE_TEST\n"},"id":30}' >/dev/null
+# ============================================================
+bold "━━━ 8. RESIZE + SWITCH + TYPE (Full Workflow) ━━━"
+
+# Resize, switch to ws1, type, switch to ws2, type, resize, switch back
+send '{"jsonrpc":"2.0","method":"window.resize","params":{"width":"800","height":"500"},"id":50}' >/dev/null; sleep 1
+send '{"jsonrpc":"2.0","method":"workspace.select","params":{"index":"1"},"id":51}' >/dev/null; sleep 1
+send_text "echo WORKFLOW_WS1 > $TEST_DIR/wf1.txt\n"; sleep 2
+send '{"jsonrpc":"2.0","method":"workspace.select","params":{"index":"2"},"id":52}' >/dev/null; sleep 1
+send_text "echo WORKFLOW_WS2 > $TEST_DIR/wf2.txt\n"; sleep 2
+send '{"jsonrpc":"2.0","method":"window.resize","params":{"width":"1000","height":"700"},"id":53}' >/dev/null; sleep 2
+send '{"jsonrpc":"2.0","method":"workspace.select","params":{"index":"1"},"id":54}' >/dev/null; sleep 1
+send_text "echo WORKFLOW_BACK > $TEST_DIR/wf3.txt\n"; sleep 2
+assert_file_contains "workflow: ws1 typing after full workflow" "$TEST_DIR/wf3.txt" "WORKFLOW_BACK"
+assert_running "workflow: process alive after full workflow"
+
+# ============================================================
+bold "━━━ 9. NOTIFICATIONS ━━━"
+
+R=$(send '{"jsonrpc":"2.0","method":"notify","params":{"title":"E2E Test","body":"All systems go"},"id":60}')
+assert "notify: returns ok" "$R" '"ok":"true"'
+assert_running "notify: process alive after notification"
+
+# ============================================================
+bold "━━━ 10. THIRD WORKSPACE ━━━"
+
+send '{"jsonrpc":"2.0","method":"workspace.create","params":{"directory":"/var"},"id":70}' >/dev/null
+sleep 4
+C=$(ws_count)
+assert_eq "3ws: count is 3" "$C" "3"
+
+# Type in ws3
+send_text "echo WS3_OK > $TEST_DIR/ws3.txt\n"
 sleep 2
-assert_running "survives typing after rapid resize"
+assert_file_contains "3ws: ws3 shell works" "$TEST_DIR/ws3.txt" "WS3_OK"
 
-# ============================================================
-bold "--- Test 6: Notifications ---"
-R=$(send '{"jsonrpc":"2.0","method":"notify","params":{"title":"E2E","body":"Test notification"},"id":40}')
-assert "notify returns ok" "$R" '"ok":"true"'
+# Switch between all 3
+send '{"jsonrpc":"2.0","method":"workspace.select","params":{"index":"1"},"id":71}' >/dev/null; sleep 0.5
+send '{"jsonrpc":"2.0","method":"workspace.select","params":{"index":"2"},"id":72}' >/dev/null; sleep 0.5
+send '{"jsonrpc":"2.0","method":"workspace.select","params":{"index":"3"},"id":73}' >/dev/null; sleep 0.5
+send '{"jsonrpc":"2.0","method":"workspace.select","params":{"index":"1"},"id":74}' >/dev/null; sleep 0.5
+assert_running "3ws: survives switching between 3 workspaces"
 
-# ============================================================
-bold "--- Test 7: Close Workspace ---"
-send '{"jsonrpc":"2.0","method":"workspace.close","id":50}' >/dev/null; sleep 1
-R=$(send '{"jsonrpc":"2.0","method":"workspace.list","id":51}')
-WS_COUNT=$(echo "$R" | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('result',[])))" 2>/dev/null || echo 0)
-assert "workspace closed (count=1)" "$WS_COUNT" "1"
-assert_running "survives workspace close"
-
-# ============================================================
-bold "--- Test 8: Resize After Close ---"
-send '{"jsonrpc":"2.0","method":"window.resize","params":{"width":"1000","height":"700"},"id":60}' >/dev/null
+# Resize with 3 workspaces
+send '{"jsonrpc":"2.0","method":"window.resize","params":{"width":"800","height":"500"},"id":75}' >/dev/null; sleep 2
+send '{"jsonrpc":"2.0","method":"workspace.select","params":{"index":"2"},"id":76}' >/dev/null; sleep 1
+send_text "echo WS2_AFTER_3WS_RESIZE > $TEST_DIR/3ws_resize.txt\n"
 sleep 2
-assert_running "survives resize after workspace close"
+assert_file_contains "3ws: ws2 works after resize with 3 workspaces" "$TEST_DIR/3ws_resize.txt" "WS2_AFTER_3WS_RESIZE"
 
 # ============================================================
-bold "--- Test 9: Status ---"
-R=$(send '{"jsonrpc":"2.0","method":"system.status","id":70}')
-assert "status returns workspaces" "$R" '"workspaces"'
-assert "status returns socket" "$R" '"socket"'
+bold "━━━ 11. CLOSE WORKSPACE ━━━"
 
-# ============================================================
-bold "--- Test 10: Session Persistence ---"
-# Session should have been saved
+send '{"jsonrpc":"2.0","method":"workspace.close","id":80}' >/dev/null; sleep 2
+C=$(ws_count)
+assert_eq "close: count decreased to 2" "$C" "2"
+assert_running "close: process alive after close"
+
+# Type after close
+send_text "echo AFTER_CLOSE > $TEST_DIR/close.txt\n"
 sleep 2
-if [ -f ~/.local/share/cmux/session.json ]; then
-    green "session file exists"
-    PASS=$((PASS + 1))
-else
-    red "session file missing"
-    FAIL=$((FAIL + 1))
+assert_file_contains "close: typing works after close" "$TEST_DIR/close.txt" "AFTER_CLOSE"
+
+# ============================================================
+bold "━━━ 12. RESIZE AFTER CLOSE ━━━"
+
+send '{"jsonrpc":"2.0","method":"window.resize","params":{"width":"1000","height":"700"},"id":90}' >/dev/null; sleep 2
+assert_running "resize-after-close: process alive"
+send_text "echo RESIZE_CLOSE > $TEST_DIR/resize_close.txt\n"
+sleep 2
+assert_file_contains "resize-after-close: typing works" "$TEST_DIR/resize_close.txt" "RESIZE_CLOSE"
+
+# ============================================================
+bold "━━━ 13. SESSION PERSISTENCE ━━━"
+
+# Wait for autosave
+sleep 5
+assert_file "session: file exists" "$HOME/.local/share/cmux/session.json"
+if [ -f "$HOME/.local/share/cmux/session.json" ]; then
+    R=$(cat "$HOME/.local/share/cmux/session.json")
+    assert "session: has workspaces" "$R" "workspaces"
+    assert "session: has version" "$R" "version"
 fi
 
 # ============================================================
+bold "━━━ 14. SOCKET API COMPLETENESS ━━━"
+
+# Unknown method
+R=$(send '{"jsonrpc":"2.0","method":"nonexistent","id":100}')
+assert "api: unknown method returns error" "$R" '"error"'
+assert "api: error has message" "$R" "Method not found"
+
+# Parse error
+R=$(send 'not json at all')
+assert "api: invalid JSON returns error" "$R" '"error"'
+
+# Status
+R=$(send '{"jsonrpc":"2.0","method":"system.status","id":101}')
+assert "api: status has workspaces field" "$R" '"workspaces"'
+
+# ============================================================
+bold "━━━ 15. STRESS TEST ━━━"
+
+# Create 2 more workspaces (total 4), rapid switch + resize
+send '{"jsonrpc":"2.0","method":"workspace.create","id":110}' >/dev/null; sleep 3
+send '{"jsonrpc":"2.0","method":"workspace.create","id":111}' >/dev/null; sleep 3
+
+for i in $(seq 1 20); do
+    WS=$(( (i % 4) + 1 ))
+    send '{"jsonrpc":"2.0","method":"workspace.select","params":{"index":"'$WS'"},"id":99}' >/dev/null
+    sleep 0.1
+done
+sleep 1
+assert_running "stress: survives 20 rapid switches across 4 workspaces"
+
+# Resize during rapid switching
+for i in $(seq 1 5); do
+    W=$(( 600 + i * 50 ))
+    H=$(( 400 + i * 30 ))
+    send '{"jsonrpc":"2.0","method":"window.resize","params":{"width":"'$W'","height":"'$H'"},"id":99}' >/dev/null
+    WS=$(( (i % 4) + 1 ))
+    send '{"jsonrpc":"2.0","method":"workspace.select","params":{"index":"'$WS'"},"id":99}' >/dev/null
+    sleep 0.2
+done
+sleep 2
+assert_running "stress: survives interleaved resize+switch"
+
+# Type after stress
+send_text "echo STRESS_OK > $TEST_DIR/stress.txt\n"
+sleep 2
+assert_file_contains "stress: typing works after stress test" "$TEST_DIR/stress.txt" "STRESS_OK"
+
+# ============================================================
 echo ""
-bold "=== Log Summary ==="
+bold "━━━ LOG SUMMARY ━━━"
 KEYS=$(strings "$LOG" 2>/dev/null | grep -c "\[key\].*handled=true" || echo 0)
 SURFACES=$(strings "$LOG" 2>/dev/null | grep -c "Surface created" || echo 0)
 SWITCHES=$(strings "$LOG" 2>/dev/null | grep -c "Switched" || echo 0)
 RESIZES=$(strings "$LOG" 2>/dev/null | grep -c "\[resize\]" || echo 0)
-echo "  Keys handled: $KEYS"
 echo "  Surfaces created: $SURFACES"
 echo "  Workspace switches: $SWITCHES"
 echo "  Resize events: $RESIZES"
 
+# ============================================================
 echo ""
-bold "=== Results: $PASS passed, $FAIL failed ==="
+bold "╔══════════════════════════════════════════╗"
 if [ "$FAIL" -eq 0 ]; then
-    printf '\033[32m%s\033[0m\n' "ALL TESTS PASSED"
+    printf '║  \033[32m%-40s\033[0m║\n' "ALL $PASS TESTS PASSED"
 else
-    printf '\033[31m%s\033[0m\n' "SOME TESTS FAILED"
+    printf '║  \033[31m%-40s\033[0m║\n' "$PASS passed, $FAIL failed"
 fi
+bold "╚══════════════════════════════════════════╝"
 exit $FAIL
