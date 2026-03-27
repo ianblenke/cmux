@@ -52,6 +52,18 @@ for ws in data.get('result', []):
         send '{"jsonrpc":"2.0","method":"workspace.close","id":1}'
         ;;
 
+    split)
+        ORIENT="${1:-horizontal}"
+        send "{\"jsonrpc\":\"2.0\",\"method\":\"workspace.split\",\"params\":{\"orientation\":\"$ORIENT\"},\"id\":1}"
+        ;;
+
+    send|type)
+        TEXT="${1:?Usage: cmux send <text>}"
+        # Escape quotes for JSON
+        TEXT=$(echo "$TEXT" | sed 's/\\/\\\\/g; s/"/\\"/g')
+        send "{\"jsonrpc\":\"2.0\",\"method\":\"surface.send_text\",\"params\":{\"text\":\"$TEXT\"},\"id\":1}"
+        ;;
+
     notify)
         TITLE="${1:-Notification}"
         BODY="${2:-}"
@@ -68,6 +80,8 @@ Commands:
   cmux new [dir] [title]     Create new workspace
   cmux select <index>        Switch to workspace (1-based)
   cmux close                 Close active workspace
+  cmux split [h|v]           Split pane (horizontal/vertical)
+  cmux send <text>           Send text to active terminal
   cmux notify <title> [body] Send notification
 
 Environment:
