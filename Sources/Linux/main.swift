@@ -77,8 +77,8 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
             title: initialTitle)
         cmuxLog("[cmux] Workspace \(wsId) created")
 
-        // Restore additional workspaces from saved session
-        if let saved = LinuxSessionPersistence.load(), saved.workspaces.count > 1 {
+        // Session restore disabled for resize testing
+        if false, let saved = LinuxSessionPersistence.load(), saved.workspaces.count > 1 {
             for i in 1..<saved.workspaces.count {
                 let ws = saved.workspaces[i]
                 let home = ProcessInfo.processInfo.environment["HOME"] ?? ""
