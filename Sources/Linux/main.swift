@@ -94,7 +94,14 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
         gtk_box_append(contentBox, stack)
 
         // Tick timer — process ghostty events on main thread
-        g_timeout_add(16, { _ -> gboolean in ghosttyApp?.tick(); return 1 }, nil)
+        g_timeout_add(16, { _ -> gboolean in
+            ghosttyApp?.tick()
+            // Always render the active workspace's GL area
+            if let ws = workspaceManager.activeWorkspace, let glArea = ws.glArea {
+                gtk_gl_area_queue_render(glArea)
+            }
+            return 1
+        }, nil)
 
         // Autosave session every 30 seconds
         g_timeout_add(30000, { _ -> gboolean in

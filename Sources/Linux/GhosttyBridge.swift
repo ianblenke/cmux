@@ -18,10 +18,14 @@ var globalGLArea: UnsafeMutablePointer<GtkGLArea>?
 // MARK: - Callbacks
 
 private let wakeupCb: @convention(c) (UnsafeMutableRawPointer?) -> Void = { _ in
-    // Schedule ghostty_app_tick on the GTK main loop
+    // Schedule ghostty_app_tick + render on the GTK main loop
     g_idle_add({ _ -> gboolean in
         ghosttyApp?.tick()
-        return 0 // G_SOURCE_REMOVE — one-shot
+        // Queue render on the active workspace's GL area
+        if let ws = workspaceManager.activeWorkspace, let glArea = ws.glArea {
+            gtk_gl_area_queue_render(glArea)
+        }
+        return 0
     }, nil)
 }
 
@@ -231,9 +235,11 @@ final class GhosttyApp {
                 cmuxLog("[action] pwd: \(str)")
                 workspaceManager.updateActiveCwd(str)
             },
-            // Render requested
+            // Render requested — queue render on the ACTIVE workspace's GL area
             {
-                if let glArea = globalGLArea {
+                if let ws = workspaceManager.activeWorkspace, let glArea = ws.glArea {
+                    gtk_gl_area_queue_render(glArea)
+                } else if let glArea = globalGLArea {
                     gtk_gl_area_queue_render(glArea)
                 }
             }
