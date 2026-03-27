@@ -11,6 +11,7 @@ struct Workspace {
     var title: String
     var surface: UnsafeMutableRawPointer?  // primary surface (first pane)
     var cwd: String
+    var gitBranch: String?
     var hasUnread: Bool = false
     var lastNotification: String?
     var rootPane: PaneNode?
@@ -142,6 +143,31 @@ final class WorkspaceManager {
         }, nil)
     }
 
+    /// Update the active workspace's git branch
+    func updateActiveGitBranch(_ branch: String) {
+        guard activeIndex >= 0, activeIndex < workspaces.count else { return }
+        workspaces[activeIndex].gitBranch = branch
+        g_idle_add({ _ -> gboolean in
+            workspaceManager.updateSidebar()
+            return 0
+        }, nil)
+    }
+
+    /// Detect git branch from CWD by reading .git/HEAD
+    private func detectGitBranch(forCwd cwd: String) {
+        guard activeIndex >= 0, activeIndex < workspaces.count else { return }
+        let home = ProcessInfo.processInfo.environment["HOME"] ?? ""
+        let fullPath = cwd.hasPrefix("~") ? home + String(cwd.dropFirst(1)) : cwd
+        let gitHeadPath = fullPath + "/.git/HEAD"
+        if let headContent = try? String(contentsOfFile: gitHeadPath, encoding: .utf8),
+           headContent.hasPrefix("ref: refs/heads/") {
+            let branch = String(headContent.dropFirst("ref: refs/heads/".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            workspaces[activeIndex].gitBranch = branch
+        } else {
+            workspaces[activeIndex].gitBranch = nil
+        }
+    }
+
     /// Update the active workspace's CWD (called from action callback thread)
     func updateActiveCwd(_ cwd: String) {
         pendingCwd = cwd
@@ -168,6 +194,7 @@ final class WorkspaceManager {
             }
             workspaces[activeIndex].title = "\(workspaces[activeIndex].id): \(displayTitle)"
             workspaces[activeIndex].cwd = displayTitle  // Update CWD from title path
+            detectGitBranch(forCwd: displayTitle)
             pendingTitle = nil
             changed = true
         }
@@ -177,6 +204,7 @@ final class WorkspaceManager {
             let display = cwd.hasPrefix(home) ? "~" + cwd.dropFirst(home.count) : cwd
             workspaces[activeIndex].cwd = String(display)
             workspaces[activeIndex].title = "\(workspaces[activeIndex].id): \(display)"
+            detectGitBranch(forCwd: String(display))
             pendingCwd = nil
             changed = true
         }
@@ -184,6 +212,9 @@ final class WorkspaceManager {
         if changed {
             updateSidebar()
             updateWindowTitle()
+            if let sidebar = sidebarWidget {
+                gtk_widget_queue_draw(sidebar)
+            }
         }
     }
 
@@ -367,7 +398,8 @@ final class WorkspaceManager {
             // Show the workspace title with notification indicator
             let notifDot = ws.hasUnread ? " 🔵" : ""
             let displayText = ws.title
-            let label = gtk_label_new("\(prefix)\(displayText)\(notifDot)")
+            let branchInfo = ws.gitBranch != nil ? "  \(ws.gitBranch!)" : ""
+            let label = gtk_label_new("\(prefix)\(displayText)\(branchInfo)\(notifDot)")
             gtk_widget_set_halign(label, GTK_ALIGN_START)
             gtk_widget_set_margin_start(label, 8)
             gtk_widget_set_margin_top(label, 2)

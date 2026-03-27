@@ -58,16 +58,28 @@ func createBrowserPanel(url: String = "https://google.com") -> UnsafeMutablePoin
 /// Track the active browser WebView for scripting
 var activeBrowserWebView: UnsafeMutablePointer<WebKitWebView>?
 
+/// Last result from browser JS evaluation (set asynchronously by callback)
+var lastBrowserEvalResult: String?
+
 /// Evaluate JavaScript in the active browser panel
 func evaluateJavaScriptInBrowser(_ script: String) {
     guard let wv = activeBrowserWebView else {
         cmuxLog("[browser] No active browser for JS eval")
         return
     }
-    script.withCString { cStr in
-        webkit_web_view_evaluate_javascript(wv, cStr, -1, nil, nil, nil, nil, nil)
+
+    let evalCb: @convention(c) (OpaquePointer?, OpaquePointer?, gpointer?) -> Void = { source, result, _ in
+        // Result handling would need webkit_web_view_evaluate_javascript_finish
+        // For now, log that eval completed
+        lastBrowserEvalResult = nil
+        cmuxLog("[browser] JS eval completed")
     }
-    cmuxLog("[browser] Evaluated JS: \(script.prefix(50))...")
+
+    script.withCString { cStr in
+        webkit_web_view_evaluate_javascript(wv, cStr, -1, nil, nil, nil,
+            unsafeBitCast(evalCb, to: GAsyncReadyCallback.self), nil)
+    }
+    cmuxLog("[browser] Evaluating: \(script.prefix(80))...")
 }
 
 /// Navigate the active browser to a URL

@@ -166,10 +166,9 @@ bool cmux_ghostty_action_handler(
                 g_pwd_cb(action.pwd.pwd);
             return true;
         case ACTION_DESKTOP_NOTIFICATION: {
-            // desktop_notification_s has {title, body} at union start
-            const char** ptrs = (const char**)&action._pad;  // union starts after tag+pad
-            const char* title = ptrs[0];
-            const char* body = ptrs[1];
+            // Union data starts after tag(4) + pad(4) = offset 8 in the struct
+            const char* title = *(const char**)((char*)&action + 8);
+            const char* body = *(const char**)((char*)&action + 16);
             if (g_notification_cb)
                 g_notification_cb(title ? title : "", body ? body : "");
             return true;

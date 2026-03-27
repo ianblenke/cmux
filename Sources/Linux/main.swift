@@ -218,6 +218,16 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
                     }
                     return 1
                 }
+                // Ctrl+Shift+N: new window (spawns new process)
+                if keyval == UInt32(GDK_KEY_n) || keyval == UInt32(GDK_KEY_N) {
+                    let execPath = CommandLine.arguments[0]
+                    // Spawn new process using Process
+                    let process = Process()
+                    process.executableURL = URL(fileURLWithPath: execPath)
+                    try? process.run()
+                    cmuxLog("[cmux] Spawned new window (pid=\(process.processIdentifier))")
+                    return 1
+                }
                 // Ctrl+Shift+W: close workspace
                 if keyval == UInt32(GDK_KEY_w) || keyval == UInt32(GDK_KEY_W) {
                     workspaceManager.closeActive()
@@ -476,6 +486,16 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
     }
 
     gtk_window_present(win)
+
+    // Save session when window is closed
+    let closeCb: @convention(c) (OpaquePointer?, gpointer?) -> gboolean = { _, _ in
+        LinuxSessionPersistence.save()
+        socketServer?.stop()
+        return 0  // Allow close
+    }
+    g_signal_connect_data(UnsafeMutableRawPointer(win), "close-request",
+        unsafeBitCast(closeCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
+
     cmuxLog("[cmux] Window presented")
 }
 
