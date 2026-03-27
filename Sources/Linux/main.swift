@@ -60,11 +60,14 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
     workspaceManager.contentBoxWidget = contentBox
 
     if let gApp = ghosttyApp {
-        // Container for the active workspace's GL area (swap on switch)
-        guard let wsContainer = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0) else { return }
-        gtk_widget_set_hexpand(wsContainer, 1)
-        gtk_widget_set_vexpand(wsContainer, 1)
-        workspaceManager.contentContainer = unsafeBitCast(wsContainer, to: UnsafeMutablePointer<GtkBox>.self)
+        // GtkNotebook with hidden tabs — one page per workspace
+        guard let wsNotebook = gtk_notebook_new() else { return }
+        gtk_widget_set_hexpand(wsNotebook, 1)
+        gtk_widget_set_vexpand(wsNotebook, 1)
+        gtk_notebook_set_show_tabs(OpaquePointer(wsNotebook), 0)    // Hide tabs
+        gtk_notebook_set_show_border(OpaquePointer(wsNotebook), 0)  // Hide border
+        workspaceManager.notebook = OpaquePointer(wsNotebook)
+        let wsContainer = wsNotebook  // For the gtk_box_append below
 
         // Create initial workspace (adds its own GtkGLArea to the stack)
         cmuxLog("[cmux] Creating initial workspace...")

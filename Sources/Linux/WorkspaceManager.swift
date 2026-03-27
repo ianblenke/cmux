@@ -130,8 +130,10 @@ final class WorkspaceManager {
 
         ws.contentWidget = newGlArea
 
-        // Hold a strong ref so the widget survives being unparented
-        g_object_ref(UnsafeMutableRawPointer(newGlArea))
+        // Add to notebook (keeps widget realized even when not visible)
+        if let nb = notebook {
+            gtk_notebook_append_page(nb, newGlArea, nil)
+        }
 
         workspaces.append(ws)
         activeIndex = workspaces.count - 1
@@ -145,42 +147,33 @@ final class WorkspaceManager {
     }
 
     /// Show the active workspace's GL area in the stack
-    /// The container that holds the single active GL area (replaces GtkStack)
+    /// GtkNotebook with hidden tabs — each page is a workspace GL area
+    var notebook: OpaquePointer?  // GtkNotebook*
+    /// Legacy container reference
     var contentContainer: UnsafeMutablePointer<GtkBox>?
-    /// The currently displayed widget
     var currentDisplayedWidget: UnsafeMutablePointer<GtkWidget>?
 
     func showActiveInStack() {
-        guard let container = contentContainer else { return }
-        guard let ws = activeWorkspace else { return }
-        guard let newWidget = ws.contentWidget else { return }
+        guard let nb = notebook else { return }
 
-        // Remove current widget from container (if different)
-        if let current = currentDisplayedWidget, current != newWidget {
-            gtk_box_remove(container, current)
-            // Widget stays alive due to g_object_ref from createWorkspace
-        }
+        // Switch notebook page to active workspace
+        gtk_notebook_set_current_page(nb, Int32(activeIndex))
 
-        // Add new widget to container (if not already there)
-        if newWidget != currentDisplayedWidget {
-            gtk_box_append(container, newWidget)
-            currentDisplayedWidget = newWidget
-        }
-
-        // Focus and resize the surface
-        if let glArea = ws.glArea, let surface = ws.surface, let gApp = getGhosttyApp() {
+        // Focus the GL area and ghostty surface
+        if let ws = activeWorkspace, let glArea = ws.glArea {
             let glWidget = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
             _ = gtk_widget_grab_focus(glWidget)
 
-            // Apply current container size to the surface
-            let containerWidget = unsafeBitCast(container, to: UnsafeMutablePointer<GtkWidget>.self)
-            let w = gtk_widget_get_width(containerWidget)
-            let h = gtk_widget_get_height(containerWidget)
-            if w > 0 && h > 0 {
-                gApp.fn_surface_set_size?(surface, UInt32(w), UInt32(h))
+            // Unfocus all, focus active
+            for w in workspaces {
+                if let s = w.surface, let gApp = getGhosttyApp() {
+                    gApp.fn_surface_set_focus?(s, false)
+                }
             }
-            gApp.fn_surface_set_focus?(surface, true)
-            gtk_gl_area_queue_render(glArea)
+            if let surface = ws.surface, let gApp = getGhosttyApp() {
+                gApp.fn_surface_set_focus?(surface, true)
+                gtk_gl_area_queue_render(glArea)
+            }
         }
     }
 
@@ -444,13 +437,13 @@ final class WorkspaceManager {
         let removed = workspaces.remove(at: activeIndex)
         cmuxLog("[workspace] Closed workspace \(removed.id)")
 
-        // Remove the widget from container if displayed, release ref
-        if let contentWidget = removed.contentWidget {
-            if contentWidget == currentDisplayedWidget, let container = contentContainer {
-                gtk_box_remove(container, contentWidget)
-                currentDisplayedWidget = nil
+        // Remove page from notebook
+        if let nb = notebook {
+            // Find and remove the page for this workspace
+            let pageNum = gtk_notebook_page_num(nb, removed.contentWidget)
+            if pageNum >= 0 {
+                gtk_notebook_remove_page(nb, pageNum)
             }
-            g_object_unref(UnsafeMutableRawPointer(contentWidget))
         }
 
         // Free the surface
