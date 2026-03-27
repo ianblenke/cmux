@@ -309,13 +309,15 @@ final class WorkspaceManager {
     func splitActivePane(orientation: PaneSplit.SplitOrientation) {
         guard activeIndex >= 0, activeIndex < workspaces.count else { return }
         guard let gApp = getGhosttyApp() else { return }
-        guard let contentBox = contentBoxWidget else { return }
+        guard let stack = stack else { return }
 
-        // Get current CWD for inheritance — expand ~ back to full path
-        let currentCwd = workspaces[activeIndex].cwd
+        let ws = workspaces[activeIndex]
+
+        // Get current CWD for inheritance
+        let currentCwd = ws.cwd
         let home = ProcessInfo.processInfo.environment["HOME"] ?? "/home"
         let fullCwd: String? = currentCwd.hasPrefix("~")
-            ? home + currentCwd.dropFirst(1) : (currentCwd == "~" ? home : currentCwd)
+            ? home + String(currentCwd.dropFirst(1)) : (currentCwd == "~" ? home : currentCwd)
 
         // Create two new panes inheriting the current CWD
         guard let pane1 = createTerminalPane(ghosttyApp: gApp, workingDirectory: fullCwd),
@@ -327,24 +329,23 @@ final class WorkspaceManager {
         let split = PaneSplit(orientation: orientation, first: .leaf(pane1), second: .leaf(pane2))
         workspaces[activeIndex].rootPane = .split(split)
 
-        // Remove old content widget
-        if let oldWidget = workspaces[activeIndex].contentWidget {
-            let parent = gtk_widget_get_parent(oldWidget)
-            if let parent = parent {
-                let parentBox = unsafeBitCast(parent, to: UnsafeMutablePointer<GtkBox>.self)
-                gtk_box_remove(parentBox, oldWidget)
-            }
-            // Free old surface
-            if let oldSurface = workspaces[activeIndex].surface {
+        // Remove old GL area from stack
+        if let oldWidget = ws.contentWidget {
+            gtk_stack_remove(stack, oldWidget)
+            if let oldSurface = ws.surface {
                 gApp.fn_surface_free?(oldSurface)
             }
         }
 
-        // Build new widget tree
+        // Build new widget tree (GtkPaned with two GL areas)
         if let newWidget = buildPaneWidget(.split(split)) {
-            gtk_box_append(contentBox, newWidget)
+            let stackName = "ws-\(ws.id)"
+            stackName.withCString { cName in
+                gtk_stack_add_named(stack, newWidget, cName)
+            }
             workspaces[activeIndex].contentWidget = newWidget
-            workspaces[activeIndex].surface = pane1.surface  // Primary surface
+            workspaces[activeIndex].surface = pane1.surface
+            showActiveInStack()
         }
 
         cmuxLog("[split] Split \(orientation == .horizontal ? "horizontal" : "vertical")")
@@ -354,31 +355,32 @@ final class WorkspaceManager {
     func closeFocusedPane() {
         guard activeIndex >= 0, activeIndex < workspaces.count else { return }
         guard workspaces[activeIndex].rootPane != nil else { return }
-        guard let contentBox = contentBoxWidget else { return }
+        guard let stack = stack else { return }
+        guard let gApp = getGhosttyApp() else { return }
 
-        // Remove the entire split and revert to a single pane
-        // (Full tree manipulation deferred — for now, collapse to one fresh pane)
-        if let oldWidget = workspaces[activeIndex].contentWidget {
-            let parent = gtk_widget_get_parent(oldWidget)
-            if let parent = parent {
-                let parentBox = unsafeBitCast(parent, to: UnsafeMutablePointer<GtkBox>.self)
-                gtk_box_remove(parentBox, oldWidget)
-            }
+        let ws = workspaces[activeIndex]
+
+        // Remove old split from stack
+        if let oldWidget = ws.contentWidget {
+            gtk_stack_remove(stack, oldWidget)
         }
 
-        // Create a single new pane
-        if let gApp = getGhosttyApp() {
-            let home = ProcessInfo.processInfo.environment["HOME"] ?? ""
-            let cwd = workspaces[activeIndex].cwd
-            let fullCwd = cwd.hasPrefix("~") ? home + cwd.dropFirst(1) : cwd
+        // Create a single new GL area
+        let home = ProcessInfo.processInfo.environment["HOME"] ?? ""
+        let cwd = ws.cwd
+        let fullCwd = cwd.hasPrefix("~") ? home + String(cwd.dropFirst(1)) : cwd
 
-            guard let newPane = createTerminalPane(ghosttyApp: gApp, workingDirectory: fullCwd) else { return }
-            if let widget = newPane.widget {
-                gtk_box_append(contentBox, widget)
-                workspaces[activeIndex].contentWidget = widget
-                workspaces[activeIndex].rootPane = nil
-                workspaces[activeIndex].surface = newPane.surface
+        guard let newPane = createTerminalPane(ghosttyApp: gApp, workingDirectory: fullCwd) else { return }
+        if let widget = newPane.widget {
+            let stackName = "ws-\(ws.id)"
+            stackName.withCString { cName in
+                gtk_stack_add_named(stack, widget, cName)
             }
+            workspaces[activeIndex].contentWidget = widget
+            workspaces[activeIndex].glArea = newPane.glArea
+            workspaces[activeIndex].rootPane = nil
+            workspaces[activeIndex].surface = newPane.surface
+            showActiveInStack()
         }
 
         cmuxLog("[pane] Collapsed split to single pane")
