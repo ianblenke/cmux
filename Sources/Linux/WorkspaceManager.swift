@@ -309,6 +309,12 @@ final class WorkspaceManager {
     /// Split the active pane in the current workspace.
     /// Creates TWO fresh GtkGLAreas (avoids GL context loss from reparenting).
     func splitActivePane(orientation: PaneSplit.SplitOrientation) {
+        // Split panes disabled — the embedded API's ghostty_surface_new crashes
+        // when creating surfaces in GtkGLAreas nested inside GtkPaned within GtkStack.
+        // The GL context isn't properly initialized in that configuration.
+        // TODO: Fix by deferring surface creation or using a different split approach.
+        cmuxLog("[split] Split panes temporarily disabled (GL context issue in nested containers)")
+        return
         guard activeIndex >= 0, activeIndex < workspaces.count else { return }
         guard let gApp = getGhosttyApp() else { return }
         guard let stack = stack else { return }
