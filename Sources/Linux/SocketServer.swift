@@ -266,6 +266,47 @@ class SocketControlServer {
             }
             return errorResponse(id: id, code: -32602, message: "Missing 'key' parameter")
 
+        case "system.status":
+            let ws = workspaceManager.workspaces
+            let active = workspaceManager.activeWorkspace
+            return SocketResponse(jsonrpc: "2.0", result: AnyCodable([
+                "workspaces": String(ws.count),
+                "active_workspace": active.map { String($0.id) } ?? "none",
+                "active_title": active?.title ?? "",
+                "active_cwd": active?.cwd ?? "",
+                "active_branch": active?.gitBranch ?? "",
+                "has_browser": activeBrowserWebView != nil ? "true" : "false",
+                "socket": socketServer?.socketPath ?? "",
+                "pid": String(ProcessInfo.processInfo.processIdentifier),
+            ]), error: nil, id: id)
+
+        case "browser.snapshot":
+            // Get a simplified DOM structure for AI agents
+            let js = """
+            (function() {
+                function snap(el, depth) {
+                    if (depth > 4) return null;
+                    var tag = el.tagName ? el.tagName.toLowerCase() : '#text';
+                    var result = {tag: tag};
+                    if (el.id) result.id = el.id;
+                    if (el.className && typeof el.className === 'string') result.class = el.className.split(' ').slice(0,3).join(' ');
+                    if (el.textContent && !el.children.length) result.text = el.textContent.slice(0,100);
+                    if (el.href) result.href = el.href;
+                    if (el.src) result.src = el.src;
+                    if (el.children && el.children.length > 0) {
+                        result.children = Array.from(el.children).slice(0,20).map(c => snap(c, depth+1)).filter(x => x);
+                    }
+                    return result;
+                }
+                return JSON.stringify(snap(document.body, 0));
+            })()
+            """
+            pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+            g_idle_add({ _ -> gboolean in
+                pendingSocketAction?(); pendingSocketAction = nil; return 0
+            }, nil)
+            return successResponse(id: id, result: ["ok": "true", "note": "DOM snapshot sent to browser eval"])
+
         case "browser.eval":
             // Execute JavaScript in the browser panel
             let js = request.params?["script"] ?? ""

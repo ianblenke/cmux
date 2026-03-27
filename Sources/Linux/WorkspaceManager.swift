@@ -303,9 +303,11 @@ final class WorkspaceManager {
 
     /// Close the active workspace
     func closeActive() {
-        guard workspaces.count > 1 else {
-            cmuxLog("[workspace] Can't close last workspace")
-            return
+        if workspaces.count <= 1 {
+            cmuxLog("[workspace] Closing last workspace, exiting")
+            LinuxSessionPersistence.clear()
+            socketServer?.stop()
+            exit(0)
         }
         let removed = workspaces.remove(at: activeIndex)
         cmuxLog("[workspace] Closed workspace \(removed.id)")

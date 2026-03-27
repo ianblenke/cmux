@@ -11,6 +11,7 @@ if [ "$CMD" = "help" ] || [ "$CMD" = "--help" ] || [ "$CMD" = "-h" ]; then
 cmux — control cmux-linux via socket API
 
 Commands:
+  cmux status                Show comprehensive app status
   cmux identify              Show app info (version, pid)
   cmux list                  List all workspaces
   cmux new [dir] [title]     Create new workspace
@@ -21,6 +22,7 @@ Commands:
   cmux browser [url]         Open browser in split
   cmux navigate <url>        Navigate browser to URL
   cmux eval <javascript>     Execute JS in browser
+  cmux snapshot              Get browser DOM snapshot (for agents)
   cmux notify <title> [body] Send notification
 
 Environment:
@@ -52,6 +54,24 @@ send() {
 shift 2>/dev/null || true
 
 case "$CMD" in
+    status)
+        send '{"jsonrpc":"2.0","method":"system.status","id":1}' | python3 -c "
+import sys, json
+d = json.load(sys.stdin).get('result', {})
+print(f\"Workspaces: {d.get('workspaces', '?')}\")
+print(f\"Active: {d.get('active_title', '?')}\")
+print(f\"CWD: {d.get('active_cwd', '?')}\")
+if d.get('active_branch'): print(f\"Branch: {d.get('active_branch')}\")
+print(f\"Browser: {'open' if d.get('has_browser') == 'true' else 'none'}\")
+print(f\"Socket: {d.get('socket', '?')}\")
+print(f\"PID: {d.get('pid', '?')}\")
+" 2>/dev/null || send '{"jsonrpc":"2.0","method":"system.status","id":1}'
+        ;;
+
+    snapshot)
+        send '{"jsonrpc":"2.0","method":"browser.snapshot","id":1}'
+        ;;
+
     identify|id)
         send '{"jsonrpc":"2.0","method":"system.identify","id":1}'
         ;;
@@ -124,6 +144,7 @@ for ws in data.get('result', []):
 cmux — control cmux-linux via socket API
 
 Commands:
+  cmux status                Show comprehensive app status
   cmux identify              Show app info (version, pid)
   cmux list                  List all workspaces
   cmux new [dir] [title]     Create new workspace
@@ -134,6 +155,7 @@ Commands:
   cmux browser [url]         Open browser in split
   cmux navigate <url>        Navigate browser to URL
   cmux eval <javascript>     Execute JS in browser
+  cmux snapshot              Get browser DOM snapshot (for agents)
   cmux notify <title> [body] Send notification
 
 Environment:
