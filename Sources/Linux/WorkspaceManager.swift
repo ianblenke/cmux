@@ -186,55 +186,44 @@ final class WorkspaceManager {
         }
     }
 
-    /// Split the active pane in the current workspace
+    /// Split the active pane in the current workspace.
+    /// Creates TWO fresh GtkGLAreas (avoids GL context loss from reparenting).
     func splitActivePane(orientation: PaneSplit.SplitOrientation) {
         guard activeIndex >= 0, activeIndex < workspaces.count else { return }
-        guard let gApp = ghosttyApp else { return }
+        guard let gApp = getGhosttyApp() else { return }
         guard let contentBox = contentBoxWidget else { return }
 
-        let ws = workspaces[activeIndex]
-
-        // Create new pane
-        guard let newPane = createTerminalPane(ghosttyApp: gApp) else {
-            cmuxLog("[split] Failed to create new pane")
+        // Create two new panes (both start in home dir — CWD inheritance TODO)
+        guard let pane1 = createTerminalPane(ghosttyApp: gApp),
+              let pane2 = createTerminalPane(ghosttyApp: gApp) else {
+            cmuxLog("[split] Failed to create panes")
             return
         }
 
-        if let currentRoot = ws.rootPane {
-            // Already has a pane tree — wrap current root + new pane in a split
-            let split = PaneSplit(orientation: orientation, first: currentRoot, second: .leaf(newPane))
-            workspaces[activeIndex].rootPane = .split(split)
-        } else if let currentWidget = ws.contentWidget {
-            // First split — wrap the existing GL area in a pane leaf + new pane
-            let existingLeaf = PaneLeaf(id: 0)
-            existingLeaf.widget = currentWidget
-            existingLeaf.glArea = unsafeBitCast(currentWidget, to: UnsafeMutablePointer<GtkGLArea>.self)
-            existingLeaf.surface = ws.surface
+        let split = PaneSplit(orientation: orientation, first: .leaf(pane1), second: .leaf(pane2))
+        workspaces[activeIndex].rootPane = .split(split)
 
-            let split = PaneSplit(orientation: orientation, first: .leaf(existingLeaf), second: .leaf(newPane))
-            workspaces[activeIndex].rootPane = .split(split)
-        } else {
-            cmuxLog("[split] No content to split")
-            return
-        }
-
-        // Rebuild the widget tree
-        if let oldWidget = ws.contentWidget {
-            // Remove old widget from parent
+        // Remove old content widget
+        if let oldWidget = workspaces[activeIndex].contentWidget {
             let parent = gtk_widget_get_parent(oldWidget)
             if let parent = parent {
                 let parentBox = unsafeBitCast(parent, to: UnsafeMutablePointer<GtkBox>.self)
                 gtk_box_remove(parentBox, oldWidget)
             }
+            // Free old surface
+            if let oldSurface = workspaces[activeIndex].surface {
+                gApp.fn_surface_free?(oldSurface)
+            }
         }
 
-        // Build new widget tree from pane structure
-        if let newWidget = buildPaneWidget(workspaces[activeIndex].rootPane!) {
+        // Build new widget tree
+        if let newWidget = buildPaneWidget(.split(split)) {
             gtk_box_append(contentBox, newWidget)
             workspaces[activeIndex].contentWidget = newWidget
+            workspaces[activeIndex].surface = pane1.surface  // Primary surface
         }
 
-        cmuxLog("[split] Split \(orientation == .horizontal ? "horizontal" : "vertical"), panes in workspace \(workspaces[activeIndex].id)")
+        cmuxLog("[split] Split \(orientation == .horizontal ? "horizontal" : "vertical")")
     }
 
     /// The content area box widget (set by main.swift)
