@@ -154,44 +154,28 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
 
             let isShift = mods & 1 != 0
 
-            if isMeta {
-                // Ctrl+Shift+C: copy selection to clipboard
-                if isShift && (keyval == UInt32(GDK_KEY_c) || keyval == UInt32(GDK_KEY_C)) {
+            let isAlt = mods & 4 != 0
+
+            // === Ctrl+Shift combos (terminal-safe: Ctrl+Shift doesn't conflict with shell) ===
+            if isCtrl && isShift {
+                // Ctrl+Shift+C: copy selection
+                if keyval == UInt32(GDK_KEY_c) || keyval == UInt32(GDK_KEY_C) {
                     _ = gApp.copySelection()
                     return 1
                 }
-                // Ctrl+Shift+V: paste from clipboard
-                if isShift && (keyval == UInt32(GDK_KEY_v) || keyval == UInt32(GDK_KEY_V)) {
+                // Ctrl+Shift+V: paste
+                if keyval == UInt32(GDK_KEY_v) || keyval == UInt32(GDK_KEY_V) {
                     if let surface = workspaceManager.activeSurface {
                         cmux_ghostty_paste_from_clipboard(surface)
                     }
                     return 1
                 }
-                // Alt+Ctrl+arrows: focus pane directionally
-                let isAlt = mods & 4 != 0
-                if isAlt && (keyval == UInt32(GDK_KEY_Left) || keyval == UInt32(GDK_KEY_Right) ||
-                             keyval == UInt32(GDK_KEY_Up) || keyval == UInt32(GDK_KEY_Down)) {
-                    // Move focus to next/prev child widget in the paned tree
-                    if let win = workspaceManager.window {
-                        let winWidget = unsafeBitCast(win, to: UnsafeMutablePointer<GtkWidget>.self)
-                        let forward = keyval == UInt32(GDK_KEY_Right) || keyval == UInt32(GDK_KEY_Down)
-                        _ = gtk_widget_child_focus(winWidget, forward ? GTK_DIR_TAB_FORWARD : GTK_DIR_TAB_BACKWARD)
-                    }
-                    return 1
-                }
-
-                // Ctrl+D / Ctrl+Shift+D: split pane
+                // Ctrl+Shift+D: split vertical
                 if keyval == UInt32(GDK_KEY_d) || keyval == UInt32(GDK_KEY_D) {
-                    let orientation: PaneSplit.SplitOrientation = isShift ? .vertical : .horizontal
-                    workspaceManager.splitActivePane(orientation: orientation)
+                    workspaceManager.splitActivePane(orientation: .vertical)
                     return 1
                 }
-                // Ctrl+W: close current workspace
-                if keyval == UInt32(GDK_KEY_w) || keyval == UInt32(GDK_KEY_W) {
-                    workspaceManager.closeActive()
-                    return 1
-                }
-                // Ctrl+T or Super+T: new workspace
+                // Ctrl+Shift+T: new workspace (alternative to Super+T)
                 if keyval == UInt32(GDK_KEY_t) || keyval == UInt32(GDK_KEY_T) {
                     if let gl = workspaceManager.glArea {
                         let w = unsafeBitCast(gl, to: UnsafeMutablePointer<GtkWidget>.self)
@@ -201,20 +185,63 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
                     }
                     return 1
                 }
-                // Ctrl+1-9: switch workspace
+                // Ctrl+Shift+W: close workspace
+                if keyval == UInt32(GDK_KEY_w) || keyval == UInt32(GDK_KEY_W) {
+                    workspaceManager.closeActive()
+                    return 1
+                }
+            }
+
+            // === Super (Cmd) combos — cmux-specific, never conflicts with shell ===
+            if isSuper {
+                // Super+D: split horizontal
+                if keyval == UInt32(GDK_KEY_d) || keyval == UInt32(GDK_KEY_D) {
+                    let orientation: PaneSplit.SplitOrientation = isShift ? .vertical : .horizontal
+                    workspaceManager.splitActivePane(orientation: orientation)
+                    return 1
+                }
+                // Super+T: new workspace
+                if keyval == UInt32(GDK_KEY_t) || keyval == UInt32(GDK_KEY_T) {
+                    if let gl = workspaceManager.glArea {
+                        let w = unsafeBitCast(gl, to: UnsafeMutablePointer<GtkWidget>.self)
+                        gtk_gl_area_make_current(gl)
+                        _ = workspaceManager.createWorkspace(
+                            ghosttyApp: gApp, glArea: gl, widget: w)
+                    }
+                    return 1
+                }
+                // Super+1-9: switch workspace
                 if keyval >= UInt32(GDK_KEY_1) && keyval <= UInt32(GDK_KEY_9) {
                     let idx = Int(keyval - UInt32(GDK_KEY_1))
                     workspaceManager.switchTo(index: idx)
                     return 1
                 }
-                // Ctrl+]: next workspace
+                // Super+]: next workspace
                 if keyval == UInt32(GDK_KEY_bracketright) {
                     workspaceManager.next()
                     return 1
                 }
-                // Ctrl+[: previous workspace
+                // Super+[: previous workspace
                 if keyval == UInt32(GDK_KEY_bracketleft) {
                     workspaceManager.previous()
+                    return 1
+                }
+                // Super+W: close workspace
+                if keyval == UInt32(GDK_KEY_w) || keyval == UInt32(GDK_KEY_W) {
+                    workspaceManager.closeActive()
+                    return 1
+                }
+            }
+
+            // === Alt+arrows: pane focus navigation ===
+            if isAlt && isCtrl {
+                if keyval == UInt32(GDK_KEY_Left) || keyval == UInt32(GDK_KEY_Right) ||
+                   keyval == UInt32(GDK_KEY_Up) || keyval == UInt32(GDK_KEY_Down) {
+                    if let win = workspaceManager.window {
+                        let winWidget = unsafeBitCast(win, to: UnsafeMutablePointer<GtkWidget>.self)
+                        let forward = keyval == UInt32(GDK_KEY_Right) || keyval == UInt32(GDK_KEY_Down)
+                        _ = gtk_widget_child_focus(winWidget, forward ? GTK_DIR_TAB_FORWARD : GTK_DIR_TAB_BACKWARD)
+                    }
                     return 1
                 }
             }
@@ -388,13 +415,19 @@ do {
               -h, --help           Show this help
 
             Keyboard Shortcuts:
-              Ctrl+T          New workspace
-              Ctrl+W          Close workspace
-              Ctrl+1-9        Switch workspace
-              Ctrl+D          Split horizontal
-              Ctrl+Shift+D    Split vertical
-              Ctrl+Shift+C    Copy selection
-              Ctrl+Shift+V    Paste clipboard
+              Super+T / Ctrl+Shift+T    New workspace
+              Super+W / Ctrl+Shift+W    Close workspace
+              Super+1-9                 Switch workspace
+              Super+]/[                 Next/prev workspace
+              Super+D                   Split horizontal
+              Super+Shift+D / Ctrl+Shift+D  Split vertical
+              Ctrl+Shift+C              Copy selection
+              Ctrl+Shift+V              Paste clipboard
+              Ctrl+Alt+arrows           Focus pane
+
+            Socket API:
+              SOCK=$(cat /tmp/cmux-socket-path)
+              echo '{"method":"workspace.list"}' | socat - UNIX-CONNECT:$SOCK
             """)
             exit(0)
         default:
