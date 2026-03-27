@@ -113,19 +113,14 @@ final class WorkspaceManager {
         g_signal_connect_data(newGlArea, "realize",
             unsafeBitCast(realizeCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
 
-        // Resize callback — only process for the active workspace's GL area
+        // Resize callback — debounced: store pending size, apply on next tick
         let resizeCb: @convention(c) (UnsafeMutablePointer<GtkGLArea>?, Int32, Int32, gpointer?) -> Void = { glArea, w, h, _ in
             guard let glArea = glArea, w > 0, h > 0 else { return }
-            // Only resize if this is the active workspace's GL area
             guard let activeWs = workspaceManager.activeWorkspace,
-                  activeWs.glArea == glArea,
-                  let surface = activeWs.surface,
-                  let gApp = getGhosttyApp() else { return }
-            gApp.fn_surface_set_size?(surface, UInt32(w), UInt32(h))
-            // Force full re-render after resize
-            gApp.fn_surface_refresh?(surface)
-            gtk_gl_area_queue_render(glArea)
-            cmuxLog("[resize] \(w)x\(h) active=ws\(activeWs.id)")
+                  activeWs.glArea == glArea else { return }
+            // Store pending resize — applied by tick timer
+            pendingResizeW = w
+            pendingResizeH = h
         }
         g_signal_connect_data(newGlArea, "resize",
             unsafeBitCast(resizeCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
@@ -583,6 +578,10 @@ final class WorkspaceManager {
 
 // Global workspace manager
 var workspaceManager = WorkspaceManager()
+
+/// Pending resize — debounced, applied by tick timer
+var pendingResizeW: Int32 = 0
+var pendingResizeH: Int32 = 0
 
 // Sidebar click callback — extract workspace index from widget name
 private let workspaceSidebarClickCb: @convention(c) (

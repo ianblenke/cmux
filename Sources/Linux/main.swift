@@ -98,16 +98,18 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
         // Tick timer — process ghostty events on main thread
         g_timeout_add(16, { _ -> gboolean in
             ghosttyApp?.tick()
-            if let ws = workspaceManager.activeWorkspace, let glArea = ws.glArea {
+            if let ws = workspaceManager.activeWorkspace, let glArea = ws.glArea,
+               let surface = ws.surface, let gApp = getGhosttyApp() {
+                // Apply pending resize (debounced — only final size matters)
+                if pendingResizeW > 0 && pendingResizeH > 0 {
+                    gApp.fn_surface_set_size?(surface, UInt32(pendingResizeW), UInt32(pendingResizeH))
+                    gApp.fn_surface_refresh?(surface)
+                    pendingResizeW = 0
+                    pendingResizeH = 0
+                }
+                // Ensure focus and render
+                gApp.fn_surface_set_focus?(surface, true)
                 gtk_gl_area_queue_render(glArea)
-                if let surface = ws.surface {
-                    ghosttyApp?.fn_surface_set_focus?(surface, true)
-                }
-                // Also re-grab GTK widget focus
-                let w = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
-                if gtk_widget_has_focus(w) == 0 {
-                    _ = gtk_widget_grab_focus(w)
-                }
             }
             return 1
         }, nil)
