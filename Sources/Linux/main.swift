@@ -361,17 +361,14 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
                 }
             }
 
-            // Use hardware keycode if valid, otherwise map from keyval
+            // Use hardware keycode from GTK (real keyboard sends correct evdev codes)
+            // Fall back to keyval→evdev mapping only if hwKeycode is 0
             let evdevKeycode: UInt32
-            let mappedKeycode = gdkKeyvalToEvdev(keyval)
-            if hwKeycode > 0 && hwKeycode != 9 {
-                // GTK provided a real hardware keycode (not Escape/default)
-                // But verify: if keyval doesn't match Escape, keycode 9 is wrong
+            if hwKeycode > 0 {
                 evdevKeycode = hwKeycode
-            } else if mappedKeycode > 0 {
-                evdevKeycode = mappedKeycode
             } else {
-                evdevKeycode = hwKeycode
+                let mappedKeycode = gdkKeyvalToEvdev(keyval)
+                evdevKeycode = mappedKeycode > 0 ? mappedKeycode : 0
             }
 
             // Convert keyval to UTF-8 text
@@ -381,7 +378,10 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
                 text = String(Character(scalar))
             }
 
+            // Log every key for debugging
+            cmuxLog("[key] keyval=\(keyval) hw=\(hwKeycode) evdev=\(evdevKeycode) text=\(text ?? "nil") mods=\(mods)")
             let handled = gApp.sendKey(keycode: evdevKeycode, text: text, mods: mods, action: 1)
+            cmuxLog("[key] handled=\(handled)")
             return handled ? 1 : 0
         }
         g_signal_connect_data(UnsafeMutableRawPointer(keyController), "key-pressed",

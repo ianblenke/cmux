@@ -358,19 +358,22 @@ final class GhosttyApp {
 
     /// Send a key event to the ghostty surface via C helper (correct ABI).
     func sendKey(keycode: UInt32, text: String?, mods: Int32, action: Int32) -> Bool {
-        guard let surface = surface else { return false }
+        // Use the ACTIVE workspace's surface, not the last-created surface
+        let targetSurface = workspaceManager.activeSurface ?? surface
+        guard let targetSurface = targetSurface else { return false }
 
         if let text = text, !text.isEmpty {
             return text.withCString { cStr in
-                cmux_ghostty_surface_key(surface, action, mods, 0, keycode, cStr, 0, false)
+                cmux_ghostty_surface_key(targetSurface, action, mods, 0, keycode, cStr, 0, false)
             }
         } else {
-            return cmux_ghostty_surface_key(surface, action, mods, 0, keycode, nil, 0, false)
+            return cmux_ghostty_surface_key(targetSurface, action, mods, 0, keycode, nil, 0, false)
         }
     }
 
     /// Send raw text input to the surface (for IME).
     func sendText(_ text: String) {
+        let surface = workspaceManager.activeSurface ?? self.surface
         guard let surface = surface else { return }
         text.withCString { cStr in
             cmux_ghostty_surface_text(surface, cStr, text.utf8.count)
@@ -382,6 +385,7 @@ final class GhosttyApp {
     /// Execute a ghostty binding action by name (e.g., "increase_font_size:1")
     @discardableResult
     func bindingAction(_ action: String) -> Bool {
+        let surface = workspaceManager.activeSurface ?? self.surface
         guard let surface = surface, let fn = fn_surface_binding_action else { return false }
         return action.withCString { cStr in
             fn(surface, cStr, UInt(action.utf8.count))
