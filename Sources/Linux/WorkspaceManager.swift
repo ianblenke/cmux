@@ -347,5 +347,10 @@ private let workspaceSidebarClickCb: @convention(c) (
     let nameStr = String(cString: name)
     if nameStr.hasPrefix("ws-"), let idx = Int(nameStr.dropFirst(3)) {
         workspaceManager.switchTo(index: idx)
+        // Focus the terminal after switching
+        if let glArea = globalGLArea {
+            let w = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
+            _ = gtk_widget_grab_focus(w)
+        }
     }
 }
