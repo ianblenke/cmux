@@ -306,6 +306,26 @@ class SocketControlServer {
             }, nil)
             return successResponse(id: id, result: ["ok": "true", "note": "DOM snapshot sent to browser eval"])
 
+        case "window.resize":
+            if let wStr = request.params?["width"], let hStr = request.params?["height"],
+               let w = Int32(wStr), let h = Int32(hStr) {
+                let width = w
+                let height = h
+                pendingResizeW = width
+                pendingResizeH = height
+                g_idle_add({ _ -> gboolean in
+                    if let win = workspaceManager.window {
+                        gtk_window_set_default_size(win, pendingResizeW, pendingResizeH)
+                        // Also try direct widget size
+                        let widget = unsafeBitCast(win, to: UnsafeMutablePointer<GtkWidget>.self)
+                        gtk_widget_set_size_request(widget, pendingResizeW, pendingResizeH)
+                    }
+                    return 0
+                }, nil)
+                return successResponse(id: id, result: ["ok": "true"])
+            }
+            return errorResponse(id: id, code: -32602, message: "Missing width/height")
+
         case "browser.eval":
             // Execute JavaScript in the browser panel
             let js = request.params?["script"] ?? ""
