@@ -39,6 +39,12 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
     workspaceManager.sidebarBox = sidebarBox
     workspaceManager.sidebarWidget = sidebar
     workspaceManager.window = win
+
+    // Style sidebar background
+    let sidebarCss = gtk_css_provider_new()!
+    gtk_css_provider_load_from_string(sidebarCss, "box { background: alpha(black, 0.3); }")
+    let sidebarCtx = gtk_widget_get_style_context(sidebar)
+    gtk_style_context_add_provider(sidebarCtx, OpaquePointer(sidebarCss), 800)
     gtk_box_append(sidebarBox, gtk_label_new("Workspaces"))
     gtk_box_append(hboxPtr, sidebar)
     let sep = gtk_separator_new(GTK_ORIENTATION_VERTICAL)

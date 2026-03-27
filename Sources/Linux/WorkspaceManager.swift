@@ -348,20 +348,42 @@ final class WorkspaceManager {
             child = next
         }
 
-        // Add header
+        // Add header with styling
         let header = gtk_label_new("Workspaces")
         gtk_widget_set_halign(header, GTK_ALIGN_START)
+        gtk_widget_set_margin_start(header, 8)
+        gtk_widget_set_margin_top(header, 4)
+        gtk_widget_set_margin_bottom(header, 4)
+        // Style the header with CSS
+        let headerCss = gtk_css_provider_new()!
+        gtk_css_provider_load_from_string(headerCss, "label { font-weight: bold; font-size: 11px; opacity: 0.6; }")
+        let headerCtx = gtk_widget_get_style_context(header)
+        gtk_style_context_add_provider(headerCtx, OpaquePointer(headerCss), 800)
         gtk_box_append(box, header)
 
         // Add workspace entries
         for (i, ws) in workspaces.enumerated() {
             let prefix = i == activeIndex ? "▸ " : "  "
             // Show the workspace title with notification indicator
-            let notifMark = ws.hasUnread ? " *" : ""
+            let notifDot = ws.hasUnread ? " 🔵" : ""
             let displayText = ws.title
-            let label = gtk_label_new("\(prefix)\(displayText)\(notifMark)")
+            let label = gtk_label_new("\(prefix)\(displayText)\(notifDot)")
             gtk_widget_set_halign(label, GTK_ALIGN_START)
-            // Ellipsize handled by truncating in Swift
+            gtk_widget_set_margin_start(label, 8)
+            gtk_widget_set_margin_top(label, 2)
+            gtk_widget_set_margin_bottom(label, 2)
+
+            // Style active workspace with highlight
+            let css = gtk_css_provider_new()!
+            if i == activeIndex {
+                gtk_css_provider_load_from_string(css, "label { background: alpha(white, 0.1); border-radius: 4px; padding: 4px 8px; font-size: 12px; }")
+            } else if ws.hasUnread {
+                gtk_css_provider_load_from_string(css, "label { color: #6cb6ff; font-size: 12px; padding: 4px 8px; }")
+            } else {
+                gtk_css_provider_load_from_string(css, "label { opacity: 0.7; font-size: 12px; padding: 4px 8px; }")
+            }
+            let ctx = gtk_widget_get_style_context(label)
+            gtk_style_context_add_provider(ctx, OpaquePointer(css), 800)
 
 
             // Make clickable
