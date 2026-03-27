@@ -27,6 +27,9 @@ func createBrowserPanel(url: String = "https://google.com") -> UnsafeMutablePoin
     gtk_widget_set_vexpand(webView, 1)
     gtk_box_append(vboxPtr, webView)
 
+    // Store reference for scripting
+    activeBrowserWebView = wvPtr
+
     // Load URL
     url.withCString { cStr in
         webkit_web_view_load_uri(wvPtr, cStr)
@@ -50,6 +53,34 @@ func createBrowserPanel(url: String = "https://google.com") -> UnsafeMutablePoin
         nil, GConnectFlags(rawValue: 0))
 
     return vbox
+}
+
+/// Track the active browser WebView for scripting
+var activeBrowserWebView: UnsafeMutablePointer<WebKitWebView>?
+
+/// Evaluate JavaScript in the active browser panel
+func evaluateJavaScriptInBrowser(_ script: String) {
+    guard let wv = activeBrowserWebView else {
+        cmuxLog("[browser] No active browser for JS eval")
+        return
+    }
+    script.withCString { cStr in
+        webkit_web_view_evaluate_javascript(wv, cStr, -1, nil, nil, nil, nil, nil)
+    }
+    cmuxLog("[browser] Evaluated JS: \(script.prefix(50))...")
+}
+
+/// Navigate the active browser to a URL
+func navigateBrowser(_ url: String) {
+    guard let wv = activeBrowserWebView else {
+        cmuxLog("[browser] No active browser for navigation")
+        return
+    }
+    let fullUrl = url.hasPrefix("http") ? url : "https://\(url)"
+    fullUrl.withCString { cStr in
+        webkit_web_view_load_uri(wv, cStr)
+    }
+    cmuxLog("[browser] Navigated to \(fullUrl)")
 }
 
 /// Add browser.open to the socket API

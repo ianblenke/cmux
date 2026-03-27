@@ -266,6 +266,29 @@ class SocketControlServer {
             }
             return errorResponse(id: id, code: -32602, message: "Missing 'key' parameter")
 
+        case "browser.eval":
+            // Execute JavaScript in the browser panel
+            let js = request.params?["script"] ?? ""
+            if !js.isEmpty {
+                pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+                g_idle_add({ _ -> gboolean in
+                    pendingSocketAction?(); pendingSocketAction = nil; return 0
+                }, nil)
+                return successResponse(id: id, result: ["ok": "true"])
+            }
+            return errorResponse(id: id, code: -32602, message: "Missing 'script' parameter")
+
+        case "browser.navigate":
+            let url = request.params?["url"] ?? ""
+            if !url.isEmpty {
+                pendingSocketAction = { navigateBrowser(url) }
+                g_idle_add({ _ -> gboolean in
+                    pendingSocketAction?(); pendingSocketAction = nil; return 0
+                }, nil)
+                return successResponse(id: id, result: ["ok": "true"])
+            }
+            return errorResponse(id: id, code: -32602, message: "Missing 'url' parameter")
+
         case "browser.open":
             let url = request.params?["url"] ?? "https://google.com"
             pendingSocketAction = { openBrowserInSplit(url: url) }

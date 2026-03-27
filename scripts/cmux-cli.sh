@@ -19,6 +19,8 @@ Commands:
   cmux split [h|v]           Split pane (horizontal/vertical)
   cmux send <text>           Send text to active terminal
   cmux browser [url]         Open browser in split
+  cmux navigate <url>        Navigate browser to URL
+  cmux eval <javascript>     Execute JS in browser
   cmux notify <title> [body] Send notification
 
 Environment:
@@ -100,6 +102,17 @@ for ws in data.get('result', []):
         send "{\"jsonrpc\":\"2.0\",\"method\":\"browser.open\",\"params\":{\"url\":\"$URL\"},\"id\":1}"
         ;;
 
+    navigate|goto)
+        URL="${1:?Usage: cmux navigate <url>}"
+        send "{\"jsonrpc\":\"2.0\",\"method\":\"browser.navigate\",\"params\":{\"url\":\"$URL\"},\"id\":1}"
+        ;;
+
+    eval|js)
+        SCRIPT="${1:?Usage: cmux eval <javascript>}"
+        SCRIPT=$(echo "$SCRIPT" | sed 's/\\/\\\\/g; s/"/\\"/g')
+        send "{\"jsonrpc\":\"2.0\",\"method\":\"browser.eval\",\"params\":{\"script\":\"$SCRIPT\"},\"id\":1}"
+        ;;
+
     notify)
         TITLE="${1:-Notification}"
         BODY="${2:-}"
@@ -119,6 +132,8 @@ Commands:
   cmux split [h|v]           Split pane (horizontal/vertical)
   cmux send <text>           Send text to active terminal
   cmux browser [url]         Open browser in split
+  cmux navigate <url>        Navigate browser to URL
+  cmux eval <javascript>     Execute JS in browser
   cmux notify <title> [body] Send notification
 
 Environment:
