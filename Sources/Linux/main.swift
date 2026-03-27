@@ -96,6 +96,24 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
                 gApp.setContentScale(scale, scale)
                 _ = gtk_widget_grab_focus(widget)
                 cmuxLog("[cmux] Workspace \(wsId) ready: \(w)x\(h) @\(scale)x")
+
+                // Restore additional workspaces from saved session
+                if let saved = LinuxSessionPersistence.load(), saved.workspaces.count > 1 {
+                    for i in 1..<saved.workspaces.count {
+                        let ws = saved.workspaces[i]
+                        let home = ProcessInfo.processInfo.environment["HOME"] ?? ""
+                        let fullCwd = ws.cwd.hasPrefix("~")
+                            ? home + ws.cwd.dropFirst(1) : ws.cwd
+                        _ = workspaceManager.createWorkspace(
+                            ghosttyApp: gApp, glArea: glPtr, widget: widget,
+                            workingDirectory: fullCwd)
+                    }
+                    // Switch to the previously active workspace
+                    if saved.activeIndex < workspaceManager.workspaces.count {
+                        workspaceManager.switchTo(index: saved.activeIndex)
+                    }
+                    cmuxLog("[cmux] Restored \(saved.workspaces.count) workspaces")
+                }
             }
         }
         g_signal_connect_data(glArea, "realize",
@@ -121,6 +139,12 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
 
         // Tick timer — process ghostty events on main thread
         g_timeout_add(16, { _ -> gboolean in ghosttyApp?.tick(); return 1 }, nil)
+
+        // Autosave session every 30 seconds
+        g_timeout_add(30000, { _ -> gboolean in
+            LinuxSessionPersistence.save()
+            return 1
+        }, nil)
     } else {
         let label = gtk_label_new("cmux — Ghostty failed to load\nRunning in stub mode")
         gtk_widget_set_halign(label, GTK_ALIGN_CENTER)
@@ -457,6 +481,18 @@ do {
 setenv("GDK_DISABLE", "gles-api,vulkan", 1)
 cmuxLog("cmux starting...")
 
+// Handle SIGTERM/SIGINT to save session before exit
+signal(SIGTERM) { _ in
+    LinuxSessionPersistence.save()
+    socketServer?.stop()
+    exit(0)
+}
+signal(SIGINT) { _ in
+    LinuxSessionPersistence.save()
+    socketServer?.stop()
+    exit(0)
+}
+
 // Start socket control server for CLI automation
 socketServer = SocketControlServer()
 socketServer?.start()
@@ -477,6 +513,8 @@ let status = argv.withUnsafeMutableBufferPointer { buf in
     g_application_run(gapp, 1, buf.baseAddress)
 }
 free(progName)
+// Save session before exit
+LinuxSessionPersistence.save()
 socketServer?.stop()
 g_object_unref(app)
 exit(status)
