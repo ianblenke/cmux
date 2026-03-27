@@ -167,7 +167,13 @@ final class WorkspaceManager {
         // Switch visible child in GtkStack
         showActiveInStack()
 
-        // Tell ghostty the new surface is focused (required for key input)
+        // Unfocus ALL surfaces, then focus the new one
+        // (ghostty requires explicit unfocus before re-focus works)
+        for ws in workspaces {
+            if let surface = ws.surface {
+                ghosttyApp?.fn_surface_set_focus?(surface, false)
+            }
+        }
         if let newSurface = activeSurface {
             ghosttyApp?.fn_surface_set_focus?(newSurface, true)
         }
