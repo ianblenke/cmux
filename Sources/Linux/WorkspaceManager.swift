@@ -127,12 +127,10 @@ final class WorkspaceManager {
         g_signal_connect_data(newGlArea, "resize",
             unsafeBitCast(resizeCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
 
-        // Add to GtkStack
-        if let stack = stack {
-            let stackName = "ws-\(id)"
-            stackName.withCString { cName in
-                gtk_stack_add_named(stack, newGlArea, cName)
-            }
+        // Add to container (hidden — showActiveInStack will show the active one)
+        if let container = contentContainer {
+            gtk_widget_set_visible(newGlArea, 0)  // Hidden by default
+            gtk_box_append(container, newGlArea)
         }
 
         workspaces.append(ws)
@@ -147,17 +145,23 @@ final class WorkspaceManager {
     }
 
     /// Show the active workspace's GL area in the stack
+    /// The container that holds the single active GL area (replaces GtkStack)
+    var contentContainer: UnsafeMutablePointer<GtkBox>?
+    /// The currently displayed widget
+    var currentDisplayedWidget: UnsafeMutablePointer<GtkWidget>?
+
     func showActiveInStack() {
-        guard let stack = stack else { return }
         guard let ws = activeWorkspace else { return }
-        // Show the workspace's widget in the stack
-        if let contentWidget = ws.contentWidget {
-            gtk_stack_set_visible_child(stack, contentWidget)
+        guard let newWidget = ws.contentWidget else { return }
+
+        // Hide all workspace widgets, show only the active one
+        for w in workspaces {
+            if let widget = w.contentWidget {
+                gtk_widget_set_visible(widget, widget == newWidget ? 1 : 0)
+            }
         }
-        // Direct focus grab — simpler and less crash-prone
-        if let contentWidget = ws.contentWidget {
-            _ = gtk_widget_grab_focus(contentWidget)
-        }
+
+        _ = gtk_widget_grab_focus(newWidget)
     }
 
     /// Switch to workspace at index
@@ -324,7 +328,7 @@ final class WorkspaceManager {
         return
         guard activeIndex >= 0, activeIndex < workspaces.count else { return }
         guard let gApp = getGhosttyApp() else { return }
-        guard let stack = stack else { return }
+        guard let container = contentContainer else { return }
 
         let ws = workspaces[activeIndex]
 
@@ -346,7 +350,7 @@ final class WorkspaceManager {
 
         // Remove old GL area from stack
         if let oldWidget = ws.contentWidget {
-            gtk_stack_remove(stack, oldWidget)
+            gtk_box_remove(container, oldWidget)
             if let oldSurface = ws.surface {
                 gApp.fn_surface_free?(oldSurface)
             }
@@ -375,14 +379,14 @@ final class WorkspaceManager {
     func closeFocusedPane() {
         guard activeIndex >= 0, activeIndex < workspaces.count else { return }
         guard workspaces[activeIndex].rootPane != nil else { return }
-        guard let stack = stack else { return }
+        guard let container = contentContainer else { return }
         guard let gApp = getGhosttyApp() else { return }
 
         let ws = workspaces[activeIndex]
 
         // Remove old split from stack
         if let oldWidget = ws.contentWidget {
-            gtk_stack_remove(stack, oldWidget)
+            gtk_box_remove(container, oldWidget)
         }
 
         // Create a single new GL area
@@ -420,9 +424,10 @@ final class WorkspaceManager {
         let removed = workspaces.remove(at: activeIndex)
         cmuxLog("[workspace] Closed workspace \(removed.id)")
 
-        // Remove from GtkStack
-        if let stack = stack, let contentWidget = removed.contentWidget {
-            gtk_stack_remove(stack, contentWidget)
+        // Remove the widget from the container
+        if let contentWidget = removed.contentWidget, let container = contentContainer {
+            gtk_widget_set_visible(contentWidget, 0)
+            gtk_box_remove(container, contentWidget)
         }
 
         // Free the surface

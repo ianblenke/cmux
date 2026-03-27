@@ -60,12 +60,11 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
     workspaceManager.contentBoxWidget = contentBox
 
     if let gApp = ghosttyApp {
-        // GtkStack holds one GtkGLArea per workspace
-        guard let stack = gtk_stack_new() else { return }
-        gtk_widget_set_hexpand(stack, 1)
-        gtk_widget_set_vexpand(stack, 1)
-        gtk_stack_set_transition_type(OpaquePointer(stack), GTK_STACK_TRANSITION_TYPE_NONE)
-        workspaceManager.stack = OpaquePointer(stack)
+        // Container for the active workspace's GL area (swap on switch)
+        guard let wsContainer = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0) else { return }
+        gtk_widget_set_hexpand(wsContainer, 1)
+        gtk_widget_set_vexpand(wsContainer, 1)
+        workspaceManager.contentContainer = unsafeBitCast(wsContainer, to: UnsafeMutablePointer<GtkBox>.self)
 
         // Create initial workspace (adds its own GtkGLArea to the stack)
         cmuxLog("[cmux] Creating initial workspace...")
@@ -91,7 +90,7 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
             cmuxLog("[cmux] Restored \(saved.workspaces.count) workspaces")
         }
 
-        gtk_box_append(contentBox, stack)
+        gtk_box_append(contentBox, wsContainer)
 
         // Tick timer — process ghostty events on main thread
         g_timeout_add(16, { _ -> gboolean in
