@@ -82,7 +82,9 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
             cmuxLog("[cmux] GL context current, creating initial workspace...")
             workspaceManager.glArea = glPtr
             let wsId = workspaceManager.createWorkspace(
-                ghosttyApp: gApp, glArea: glPtr, widget: widget)
+                ghosttyApp: gApp, glArea: glPtr, widget: widget,
+                command: initialCommand, workingDirectory: initialDirectory,
+                title: initialTitle)
             if wsId > 0 {
                 let w = gtk_widget_get_width(widget)
                 let h = gtk_widget_get_height(widget)
@@ -356,6 +358,52 @@ func cmuxLog(_ msg: String) {
     }
 }
 
+// Parse cmux-specific args and strip them before GTK sees them
+var initialCommand: String? = nil
+var initialDirectory: String? = nil
+var initialTitle: String? = nil
+var filteredArgs: [String] = [CommandLine.arguments[0]]  // Keep program name
+
+do {
+    var args = Array(CommandLine.arguments.dropFirst())
+    var i = 0
+    while i < args.count {
+        switch args[i] {
+        case "-e", "--command":
+            if i + 1 < args.count { initialCommand = args[i + 1]; i += 2 } else { i += 1 }
+        case "-d", "--directory":
+            if i + 1 < args.count { initialDirectory = args[i + 1]; i += 2 } else { i += 1 }
+        case "--title":
+            if i + 1 < args.count { initialTitle = args[i + 1]; i += 2 } else { i += 1 }
+        case "--help", "-h":
+            print("""
+            cmux-linux — Ghostty-based terminal with workspaces
+
+            Usage: cmux-linux [OPTIONS]
+
+            Options:
+              -e, --command CMD    Run CMD in the initial terminal
+              -d, --directory DIR  Set initial working directory
+              --title TITLE        Set initial workspace title
+              -h, --help           Show this help
+
+            Keyboard Shortcuts:
+              Ctrl+T          New workspace
+              Ctrl+W          Close workspace
+              Ctrl+1-9        Switch workspace
+              Ctrl+D          Split horizontal
+              Ctrl+Shift+D    Split vertical
+              Ctrl+Shift+C    Copy selection
+              Ctrl+Shift+V    Paste clipboard
+            """)
+            exit(0)
+        default:
+            filteredArgs.append(args[i])
+            i += 1
+        }
+    }
+}
+
 // Force GDK to use desktop OpenGL (not GLES/Vulkan) — same as Ghostty GTK apprt.
 setenv("GDK_DISABLE", "gles-api,vulkan", 1)
 cmuxLog("cmux starting...")
@@ -368,6 +416,12 @@ g_signal_connect_data(app, "activate",
     unsafeBitCast(callback, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
 
 let gapp = unsafeBitCast(app, to: UnsafeMutablePointer<GApplication>.self)
-let status = g_application_run(gapp, CommandLine.argc, CommandLine.unsafeArgv)
+// Pass only the program name to GTK (we already parsed our args)
+var progName = strdup(filteredArgs[0])!
+var argv: [UnsafeMutablePointer<CChar>?] = [progName, nil]
+let status = argv.withUnsafeMutableBufferPointer { buf in
+    g_application_run(gapp, 1, buf.baseAddress)
+}
+free(progName)
 g_object_unref(app)
 exit(status)

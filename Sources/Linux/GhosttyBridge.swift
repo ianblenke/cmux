@@ -269,7 +269,8 @@ final class GhosttyApp {
         if let handle = handle { dlclose(handle) }
     }
 
-    func createSurface(glArea: UnsafeMutablePointer<GtkGLArea>, widget: UnsafeMutablePointer<GtkWidget>) -> Bool {
+    func createSurface(glArea: UnsafeMutablePointer<GtkGLArea>, widget: UnsafeMutablePointer<GtkWidget>,
+                       command: String? = nil, workingDirectory: String? = nil) -> Bool {
         guard let app = app, let fn = fn_surface_new else { return false }
 
         // Store for render callback
@@ -282,6 +283,24 @@ final class GhosttyApp {
             buf.storeBytes(of: UnsafeMutableRawPointer(glArea), toByteOffset: 8, as: UnsafeMutableRawPointer.self)
             buf.storeBytes(of: UnsafeMutableRawPointer(widget), toByteOffset: 16, as: UnsafeMutableRawPointer.self)
             buf.storeBytes(of: Double(1.0), toByteOffset: 32, as: Double.self) // scale_factor
+        }
+
+        // Set working directory and command using strdup to keep strings alive
+        var dirStr: UnsafeMutablePointer<CChar>? = nil
+        var cmdStr: UnsafeMutablePointer<CChar>? = nil
+        if let dir = workingDirectory { dirStr = strdup(dir) }
+        if let cmd = command { cmdStr = strdup(cmd) }
+        defer { free(dirStr); free(cmdStr) }
+
+        if let d = dirStr {
+            scfg.withUnsafeMutableBytes { buf in
+                buf.storeBytes(of: UnsafePointer(d), toByteOffset: 48, as: UnsafePointer<CChar>?.self)
+            }
+        }
+        if let c = cmdStr {
+            scfg.withUnsafeMutableBytes { buf in
+                buf.storeBytes(of: UnsafePointer(c), toByteOffset: 56, as: UnsafePointer<CChar>?.self)
+            }
         }
 
         cmuxLog("[GhosttyBridge] Creating surface...")

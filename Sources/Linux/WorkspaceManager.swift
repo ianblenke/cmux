@@ -44,12 +44,16 @@ final class WorkspaceManager {
 
     /// Create a new workspace with a terminal surface
     func createWorkspace(ghosttyApp: GhosttyApp, glArea: UnsafeMutablePointer<GtkGLArea>,
-                         widget: UnsafeMutablePointer<GtkWidget>) -> Int {
+                         widget: UnsafeMutablePointer<GtkWidget>,
+                         command: String? = nil, workingDirectory: String? = nil,
+                         title: String? = nil) -> Int {
         let id = workspaces.count + 1
         var ws = Workspace(id: id)
+        if let title = title { ws.title = "\(id): \(title)" }
 
         // Create ghostty surface for this workspace
-        if ghosttyApp.createSurface(glArea: glArea, widget: widget) {
+        if ghosttyApp.createSurface(glArea: glArea, widget: widget,
+                                     command: command, workingDirectory: workingDirectory) {
             ws.surface = ghosttyApp.surface
             ws.contentWidget = widget  // Track the GL area widget
             // Register in pane manager for surface lookup
