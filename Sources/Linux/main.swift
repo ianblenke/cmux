@@ -123,6 +123,10 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
                                 paneManager.registerSurface(glArea: glArea, surface: gApp.surface!)
                                 workspaceManager.workspaces[i].surface = gApp.surface
                                 gApp.fn_surface_set_size?(gApp.surface!, UInt32(w), UInt32(h))
+                                // Focus only the active workspace's new surface
+                                if i == workspaceManager.activeIndex {
+                                    gApp.fn_surface_set_focus?(gApp.surface!, true)
+                                }
                             }
                             cmuxLog("[resize] Recreated ws\(ws.id)")
                         }
@@ -130,11 +134,8 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
                 }
             }
 
-            // Re-read active surface AFTER any recreation
-            if let ws = workspaceManager.activeWorkspace, let glArea = ws.glArea,
-               let surface = ws.surface, let gApp = getGhosttyApp() {
-                gtk_gl_area_make_current(glArea)
-                gApp.fn_surface_set_focus?(surface, true)
+            // Queue render on active workspace (don't call set_focus every tick — causes flicker)
+            if let ws = workspaceManager.activeWorkspace, let glArea = ws.glArea {
                 gtk_gl_area_queue_render(glArea)
             }
             return 1
