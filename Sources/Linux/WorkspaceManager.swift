@@ -71,9 +71,12 @@ final class WorkspaceManager {
         let wsIndex = workspaces.count  // Index this workspace will have
         paneManager.setCwd(glArea: newGlPtr, cwd: workingDirectory ?? "")
 
-        // Render callback for this workspace's GL area
+        // Render callback — ONLY draw if this is the active workspace
         let renderCb: @convention(c) (UnsafeMutablePointer<GtkGLArea>?, OpaquePointer?, gpointer?) -> gboolean = { glArea, ctx, _ in
-            if let surface = paneManager.surfaceForGLArea(glArea),
+            // Skip rendering for non-active workspaces
+            guard let activeWs = workspaceManager.activeWorkspace,
+                  activeWs.glArea == glArea else { return 1 }
+            if let surface = activeWs.surface,
                let gApp = getGhosttyApp() {
                 gApp.drawSurface(surface)
             }
