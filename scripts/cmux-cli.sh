@@ -3,6 +3,37 @@
 # Usage: cmux <command> [args...]
 set -euo pipefail
 
+CMD="${1:-help}"
+
+# Help doesn't need a running instance
+if [ "$CMD" = "help" ] || [ "$CMD" = "--help" ] || [ "$CMD" = "-h" ]; then
+    cat <<'HELPTEXT'
+cmux — control cmux-linux via socket API
+
+Commands:
+  cmux identify              Show app info (version, pid)
+  cmux list                  List all workspaces
+  cmux new [dir] [title]     Create new workspace
+  cmux select <index>        Switch to workspace (1-based)
+  cmux close                 Close active workspace
+  cmux split [h|v]           Split pane (horizontal/vertical)
+  cmux send <text>           Send text to active terminal
+  cmux notify <title> [body] Send notification
+
+Environment:
+  CMUX_SOCKET    Path to cmux Unix socket (auto-detected)
+
+Examples:
+  cmux new /home/user/project "my-project"
+  cmux notify "Claude" "Build succeeded"
+  cmux split vertical
+  cmux send "ls -la\n"
+  cmux select 2
+  cmux list
+HELPTEXT
+    exit 0
+fi
+
 SOCK_PATH="${CMUX_SOCKET:-$(cat /tmp/cmux-socket-path 2>/dev/null || echo "")}"
 
 if [ -z "$SOCK_PATH" ] || [ ! -S "$SOCK_PATH" ]; then
@@ -15,7 +46,6 @@ send() {
     echo "$1" | socat -t 2 - UNIX-CONNECT:"$SOCK_PATH" 2>/dev/null
 }
 
-CMD="${1:-help}"
 shift 2>/dev/null || true
 
 case "$CMD" in
