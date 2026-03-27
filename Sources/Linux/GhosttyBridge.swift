@@ -358,9 +358,13 @@ final class GhosttyApp {
 
     /// Send a key event to the ghostty surface via C helper (correct ABI).
     func sendKey(keycode: UInt32, text: String?, mods: Int32, action: Int32) -> Bool {
-        // Use the ACTIVE workspace's surface, not the last-created surface
-        let targetSurface = workspaceManager.activeSurface ?? surface
-        guard let targetSurface = targetSurface else { return false }
+        // Use the ACTIVE workspace's surface, falling back to any available surface
+        let wsSurface = workspaceManager.activeSurface
+        let targetSurface = wsSurface ?? surface
+        guard let targetSurface = targetSurface else {
+            cmuxLog("[key] ERROR: no surface available (ws=\(wsSurface == nil ? "nil" : "ok") self=\(surface == nil ? "nil" : "ok") wsCount=\(workspaceManager.workspaces.count) activeIdx=\(workspaceManager.activeIndex))")
+            return false
+        }
 
         if let text = text, !text.isEmpty {
             return text.withCString { cStr in
