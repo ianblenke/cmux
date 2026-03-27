@@ -161,14 +161,9 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
                     workspaceManager.splitActivePane(orientation: .vertical)
                     return 1
                 }
-                // Ctrl+Shift+T: new workspace (alternative to Super+T)
+                // Ctrl+Shift+T: new workspace
                 if keyval == UInt32(GDK_KEY_t) || keyval == UInt32(GDK_KEY_T) {
-                    if let gl = workspaceManager.glArea {
-                        let w = unsafeBitCast(gl, to: UnsafeMutablePointer<GtkWidget>.self)
-                        gtk_gl_area_make_current(gl)
-                        _ = workspaceManager.createWorkspace(
-                            ghosttyApp: gApp, glArea: gl, widget: w)
-                    }
+                    _ = workspaceManager.createWorkspace(ghosttyApp: gApp)
                     return 1
                 }
                 // Ctrl+Shift+N: new window (spawns new process)
@@ -208,12 +203,7 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
                 }
                 // Super+T: new workspace
                 if keyval == UInt32(GDK_KEY_t) || keyval == UInt32(GDK_KEY_T) {
-                    if let gl = workspaceManager.glArea {
-                        let w = unsafeBitCast(gl, to: UnsafeMutablePointer<GtkWidget>.self)
-                        gtk_gl_area_make_current(gl)
-                        _ = workspaceManager.createWorkspace(
-                            ghosttyApp: gApp, glArea: gl, widget: w)
-                    }
+                    _ = workspaceManager.createWorkspace(ghosttyApp: gApp)
                     return 1
                 }
                 // Super+1-9: switch workspace
