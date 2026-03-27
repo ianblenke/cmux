@@ -95,6 +95,18 @@ brew upgrade --cask cmux
 
 On first launch, macOS may ask you to confirm opening an app from an identified developer. Click **Open** to proceed.
 
+### Linux
+
+Build from source (requires Swift 6+, Zig 0.14+, GTK4):
+
+```bash
+git clone --recursive https://github.com/ianblenke/cmux.git
+cd cmux
+./scripts/build-linux.sh --install
+```
+
+See [README.linux.md](README.linux.md) for full Linux documentation, keyboard shortcuts, and CLI reference.
+
 ## Why cmux?
 
 I run a lot of Claude Code and Codex sessions in parallel. I was using Ghostty with a bunch of split panes, and relying on native macOS notifications to know when an agent needed me. But Claude Code's notification body is always just "Claude is waiting for your input" with no context, and with enough tabs open I couldn't even read the titles anymore.

@@ -1,0 +1,68 @@
+name: Linux Build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Sources/Linux/**'
+      - 'Sources/PAL/**'
+      - 'Sources/Core/**'
+      - 'Sources/CGtk4/**'
+      - 'Sources/CGhostty/**'
+      - 'Sources/CGhosttyHelpers/**'
+      - 'Sources/CWebKit/**'
+      - 'Package.linux.swift'
+      - '.github/workflows/ci-linux.yml'
+  pull_request:
+    paths:
+      - 'Sources/Linux/**'
+      - 'Sources/PAL/**'
+      - 'Sources/Core/**'
+      - 'Package.linux.swift'
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Swift
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: '6.0'
+
+      - name: Install Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: '0.14.0'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-4-dev \
+            libwebkitgtk-6.0-dev \
+            pkg-config
+
+      - name: Build libghostty
+        run: |
+          cd ghostty
+          zig build -Dapp-runtime=none -Doptimize=ReleaseFast
+
+      - name: Build cmux-linux
+        run: |
+          cp Package.linux.swift Package.swift
+          swift build
+          ls -lh .build/debug/cmux-linux
+
+      - name: Verify binary
+        run: |
+          .build/debug/cmux-linux --help
+
+      - name: Build PAL + Core (verify cross-platform modules)
+        run: |
+          # PAL and Core should compile independently
+          swift build --target cmux-pal
+          swift build --target cmux-core
