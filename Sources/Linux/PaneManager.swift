@@ -174,6 +174,22 @@ class PaneGlobalManager {
         guard let glArea = glArea else { return nil }
         return cwdMap[UnsafeMutableRawPointer(glArea)]
     }
+
+    /// Find the focused GL area by checking GTK focus state
+    func focusedGLArea() -> UnsafeMutablePointer<GtkGLArea>? {
+        for key in surfaceMap.keys {
+            let widget = unsafeBitCast(key, to: UnsafeMutablePointer<GtkWidget>.self)
+            if gtk_widget_has_focus(widget) != 0 {
+                return unsafeBitCast(key, to: UnsafeMutablePointer<GtkGLArea>.self)
+            }
+        }
+        return nil
+    }
+
+    /// Get all registered GL areas
+    var allGLAreas: [UnsafeMutableRawPointer] {
+        Array(surfaceMap.keys)
+    }
 }
 
 var paneManager = PaneGlobalManager()

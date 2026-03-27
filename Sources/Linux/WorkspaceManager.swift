@@ -233,6 +233,40 @@ final class WorkspaceManager {
         cmuxLog("[split] Split \(orientation == .horizontal ? "horizontal" : "vertical")")
     }
 
+    /// Close the focused pane within a split, collapsing the split
+    func closeFocusedPane() {
+        guard activeIndex >= 0, activeIndex < workspaces.count else { return }
+        guard workspaces[activeIndex].rootPane != nil else { return }
+        guard let contentBox = contentBoxWidget else { return }
+
+        // Remove the entire split and revert to a single pane
+        // (Full tree manipulation deferred — for now, collapse to one fresh pane)
+        if let oldWidget = workspaces[activeIndex].contentWidget {
+            let parent = gtk_widget_get_parent(oldWidget)
+            if let parent = parent {
+                let parentBox = unsafeBitCast(parent, to: UnsafeMutablePointer<GtkBox>.self)
+                gtk_box_remove(parentBox, oldWidget)
+            }
+        }
+
+        // Create a single new pane
+        if let gApp = getGhosttyApp() {
+            let home = ProcessInfo.processInfo.environment["HOME"] ?? ""
+            let cwd = workspaces[activeIndex].cwd
+            let fullCwd = cwd.hasPrefix("~") ? home + cwd.dropFirst(1) : cwd
+
+            guard let newPane = createTerminalPane(ghosttyApp: gApp, workingDirectory: fullCwd) else { return }
+            if let widget = newPane.widget {
+                gtk_box_append(contentBox, widget)
+                workspaces[activeIndex].contentWidget = widget
+                workspaces[activeIndex].rootPane = nil
+                workspaces[activeIndex].surface = newPane.surface
+            }
+        }
+
+        cmuxLog("[pane] Collapsed split to single pane")
+    }
+
     /// The content area box widget (set by main.swift)
     var contentBoxWidget: UnsafeMutablePointer<GtkBox>?
 

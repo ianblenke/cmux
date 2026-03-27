@@ -268,6 +268,16 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
                     workspaceManager.closeActive()
                     return 1
                 }
+                // Super+Shift+W: close focused pane (not workspace)
+                if isShift && (keyval == UInt32(GDK_KEY_w) || keyval == UInt32(GDK_KEY_W)) {
+                    // If we have splits, close the focused pane; otherwise close workspace
+                    if workspaceManager.workspaces[workspaceManager.activeIndex].rootPane != nil {
+                        workspaceManager.closeFocusedPane()
+                    } else {
+                        workspaceManager.closeActive()
+                    }
+                    return 1
+                }
                 // Super+K: clear scrollback
                 if keyval == UInt32(GDK_KEY_k) || keyval == UInt32(GDK_KEY_K) {
                     gApp.bindingAction("clear_screen")
