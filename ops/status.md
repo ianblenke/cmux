@@ -4,61 +4,91 @@
 
 ## What's Working
 
-### Linux Application (NEW — built this session)
-- GTK4 window with sidebar + terminal on Wayland
-- libghostty terminal rendering via OpenGL 4.6 in GtkGLArea
-- Keyboard input with GDK→evdev keycode mapping
-- Command execution with colored output
-- Ctrl+C/D/Z signal handling
-- Mouse motion, click, scroll
-- Clipboard copy (Ctrl+Shift+C) via GDK
-- Multiple workspaces (Ctrl+T new, Ctrl+W close, Ctrl+1-9 switch)
-- Sidebar with dynamic workspace list and active indicator
+### Linux Application (54 commits this session)
+
+**Terminal**
+- GPU-accelerated rendering (OpenGL 4.6 via libghostty)
+- Ghostty config support (~/.config/ghostty/config — themes, fonts, colors)
+- Font size adjustment (Ctrl+Plus/Minus/0)
+- Search/find in scrollback (Ctrl+Shift+F)
+- Scrollback navigation (Shift+PageUp/Down/Home/End)
+- Clear scrollback (Super+K)
+- Config reload (Ctrl+Shift+,)
 - HiDPI support (2x scale)
 - Terminal resize with window
-- Focus management (click-to-focus, auto-focus on create)
-- 60fps event processing tick loop
+
+**Input**
+- Full keyboard with GDK→evdev keycode mapping
+- All special keys (Backspace, Tab, arrows, Home/End, etc.)
+- Mouse click, motion, scroll
+- Clipboard copy (Ctrl+Shift+C) and paste (Ctrl+Shift+V)
+- Shell signals pass through (Ctrl+C/D/Z)
+
+**Workspaces**
+- Create (Super+T / Ctrl+Shift+T)
+- Close (Super+W / Ctrl+Shift+W)
+- Switch (Super+1-9)
+- Next/prev (Super+]/[)
+- Sidebar with CSS styling (active highlight, dimmed inactive)
+- Dynamic titles from shell (user@host:cwd)
+- Git branch detection in sidebar
+- Sidebar toggle (Super+B)
+- Click-to-switch with auto-focus
+
+**Split Panes**
+- Horizontal (Super+D)
+- Vertical (Super+Shift+D / Ctrl+Shift+D)
+- Close pane / collapse split (Super+Shift+W)
+- CWD inheritance on split
+- Pane focus navigation (Ctrl+Alt+arrows)
+
+**Browser Panels**
+- WebKitGTK 6.0 in-app browser
+- Open browser (Super+L / `cmux browser`)
+- URL bar with navigation
+- JavaScript evaluation (`cmux eval`)
+- DOM snapshot for agents (`cmux snapshot`)
+- Navigate (`cmux navigate`)
+
+**Notifications**
+- Bell detection with sidebar indicator
+- OSC 9/99/777 desktop notification parsing
+- Notification via CLI (`cmux notify`)
+
+**Persistence**
+- Session save/restore on exit/launch
+- Autosave every 30 seconds
+- SIGTERM/SIGINT-safe save
+- Window close handler save
+- XDG-compliant paths (~/.local/share/cmux/)
+
+**Automation**
+- Unix socket API (14 JSON-RPC commands)
+- CLI wrapper (15 commands)
+- Shell integration (CMUX_SOCKET_PATH in env)
+- Command-line args (-e, -d, --title, --help)
+
+**Build & Distribution**
+- `./scripts/build-linux.sh --run` (one-command build+launch)
+- `./scripts/build-linux.sh --install` (install to ~/.local/)
+- Desktop entry (cmux.desktop)
+- Shell integration installer
+- GitHub Actions CI workflow
+- Linux README with full documentation
 
 ### Cross-Platform Infrastructure
-- Platform Abstraction Layer (15 protocol files, compiles on Linux)
-- Core modules (session persistence, config, types — compiles on Linux)
-- OpenSpec coverage: 355 REQs, 219 scenarios across 21 capabilities
-- BMAD strategic docs (PRD, architecture, traceability)
+- Platform Abstraction Layer (15 protocol files)
+- Core shared modules (4 files)
+- OpenSpec: 355 requirements, 219 scenarios, 21 capabilities
 
-### Ghostty Fork (ianblenke/ghostty, branch: linux-embedded-platform)
+### Ghostty Fork (ianblenke/ghostty, merged to main)
 - GHOSTTY_PLATFORM_LINUX in embedded API
-- Conditional objc import for Linux
-- must_draw_from_app_thread for OpenGL on Linux
-- GLAD bundled in shared library
-- OpenGL surfaceInit for embedded Linux
-
-### macOS Application (existing, unchanged)
-- Full terminal rendering via libghostty
-- All existing features preserved
-- Build system unchanged (Xcode project)
+- Conditional objc import, must_draw_from_app_thread
+- GLAD bundled in shared library, OpenGL surfaceInit
 
 ## What's Next
-
-### Linux — Short Term
-1. Proper paste (Ctrl+Shift+V via async GDK clipboard read)
-2. Workspace titles from shell CWD/process name
-3. Split panes within workspaces
-4. Ghostty config file reading (themes, fonts, colors)
-5. Build script improvements (auto-detect Package.swift swap)
-
-### Linux — Medium Term
-1. Socket control API (cmux CLI)
-2. Session persistence (save/restore layout)
-3. Notification system (OSC 9/99/777)
-4. Browser panels (WebKitGTK)
-5. Linux packaging (AppImage, Flatpak)
-
-### Cross-Platform
-1. Continue PAL Core extraction (config parsing, tab manager)
-2. macOS backend wrappers for PAL protocols
-3. Shared build system (single Package.swift with conditional compilation)
-
-## Known Blockers
-- Package.swift must be manually swapped for Linux builds (`cp Package.linux.swift Package.swift`)
-- libghostty.so loaded via dlopen (not compile-time linked) due to Zig global init
-- ghostty fork changes not yet merged to main branch
+1. Linux packaging (AppImage/Flatpak)
+2. Browser accessibility tree API (full agent-browser port)
+3. Sidebar listening ports display
+4. macOS PAL extraction (shared Core modules)
+5. Automated tests for socket API
