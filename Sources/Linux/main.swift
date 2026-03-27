@@ -107,29 +107,22 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
                     let h = pendingResizeH
                     pendingResizeW = 0
                     pendingResizeH = 0
-                    cmuxLog("[resize] Settled at \(w)x\(h), recreating surface...")
-                    // Recreate ALL workspace surfaces at the new size
-                    if let gApp = getGhosttyApp() {
-                        for i in 0..<workspaceManager.workspaces.count {
-                            let ws = workspaceManager.workspaces[i]
-                            guard let glArea = ws.glArea, let oldSurface = ws.surface else { continue }
-                            let widget = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
-                            gtk_gl_area_make_current(glArea)
-                            gApp.fn_surface_free?(oldSurface)
-                            let home = ProcessInfo.processInfo.environment["HOME"] ?? ""
-                            let cwd = ws.cwd
-                            let fullCwd = cwd.hasPrefix("~") ? home + String(cwd.dropFirst(1)) : cwd
-                            if gApp.createSurface(glArea: glArea, widget: widget, workingDirectory: fullCwd) {
-                                paneManager.registerSurface(glArea: glArea, surface: gApp.surface!)
-                                workspaceManager.workspaces[i].surface = gApp.surface
-                                gApp.fn_surface_set_size?(gApp.surface!, UInt32(w), UInt32(h))
-                                // Focus only the active workspace's new surface
-                                if i == workspaceManager.activeIndex {
-                                    gApp.fn_surface_set_focus?(gApp.surface!, true)
-                                }
-                            }
-                            cmuxLog("[resize] Recreated ws\(ws.id)")
-                        }
+                    cmuxLog("[resize] Settled at \(w)x\(h)")
+                    // Only update the ACTIVE workspace — don't destroy hidden ones
+                    if let gApp = getGhosttyApp(),
+                       let activeWs = workspaceManager.activeWorkspace,
+                       let glArea = activeWs.glArea,
+                       let surface = activeWs.surface {
+                        gtk_gl_area_make_current(glArea)
+                        gApp.fn_surface_set_size?(surface, UInt32(w), UInt32(h))
+                        let widget = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
+                        let scale = Double(gtk_widget_get_scale_factor(widget))
+                        gApp.fn_surface_set_content_scale?(surface, scale, scale)
+                        gApp.fn_surface_refresh?(surface)
+                        gApp.fn_surface_set_focus?(surface, true)
+                        // Store the new size for hidden workspaces to apply on switch
+                        workspaceManager.lastResizeW = w
+                        workspaceManager.lastResizeH = h
                     }
                 }
             }

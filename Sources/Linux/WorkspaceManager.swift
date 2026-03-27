@@ -149,6 +149,9 @@ final class WorkspaceManager {
     /// Show the active workspace's GL area in the stack
     /// GtkNotebook with hidden tabs — each page is a workspace GL area
     var notebook: OpaquePointer?  // GtkNotebook*
+    /// Last resize dimensions (applied to hidden workspaces when they become visible)
+    var lastResizeW: Int32 = 0
+    var lastResizeH: Int32 = 0
     /// Legacy container reference
     var contentContainer: UnsafeMutablePointer<GtkBox>?
     var currentDisplayedWidget: UnsafeMutablePointer<GtkWidget>?
@@ -164,13 +167,12 @@ final class WorkspaceManager {
             let glWidget = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
 
             if let surface = ws.surface, let gApp = getGhosttyApp() {
-                // Just focus the new surface — don't unfocus others (causes flicker)
                 gApp.fn_surface_set_focus?(surface, true)
-                // Re-apply size (may have changed while hidden)
-                let w = gtk_widget_get_width(glWidget)
-                let h = gtk_widget_get_height(glWidget)
-                if w > 0 && h > 0 {
-                    gApp.fn_surface_set_size?(surface, UInt32(w), UInt32(h))
+                // Apply stored resize if window was resized while this workspace was hidden
+                if lastResizeW > 0 && lastResizeH > 0 {
+                    gtk_gl_area_make_current(glArea)
+                    gApp.fn_surface_set_size?(surface, UInt32(lastResizeW), UInt32(lastResizeH))
+                    gApp.fn_surface_refresh?(surface)
                 }
                 gtk_gl_area_queue_render(glArea)
             }
