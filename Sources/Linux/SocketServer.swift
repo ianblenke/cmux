@@ -242,6 +242,30 @@ class SocketControlServer {
             }, nil)
             return successResponse(id: id, result: ["ok": "true"])
 
+        case "workspace.split":
+            let orientation = request.params?["orientation"] ?? "horizontal"
+            let orient: PaneSplit.SplitOrientation = orientation == "vertical" ? .vertical : .horizontal
+            pendingSocketAction = { workspaceManager.splitActivePane(orientation: orient) }
+            g_idle_add({ _ -> gboolean in
+                pendingSocketAction?(); pendingSocketAction = nil; return 0
+            }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "surface.send_text":
+            if let text = request.params?["text"], let surface = workspaceManager.activeSurface {
+                getGhosttyApp()?.sendText(text)
+                return successResponse(id: id, result: ["ok": "true"])
+            }
+            return errorResponse(id: id, code: -32602, message: "Missing 'text' parameter or no active surface")
+
+        case "surface.send_key":
+            if let key = request.params?["key"], let surface = workspaceManager.activeSurface {
+                // Send text that includes control characters
+                getGhosttyApp()?.sendText(key)
+                return successResponse(id: id, result: ["ok": "true"])
+            }
+            return errorResponse(id: id, code: -32602, message: "Missing 'key' parameter")
+
         case "notify":
             let title = request.params?["title"] ?? ""
             let body = request.params?["body"] ?? ""
