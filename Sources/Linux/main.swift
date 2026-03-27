@@ -98,34 +98,41 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
         // Tick timer — process ghostty events on main thread
         g_timeout_add(16, { _ -> gboolean in
             ghosttyApp?.tick()
-            if let ws = workspaceManager.activeWorkspace, let glArea = ws.glArea,
-               let surface = ws.surface, let gApp = getGhosttyApp() {
-                // Check for pending resize (settled for 300ms)
-                if pendingResizeW > 0 && pendingResizeH > 0 {
-                    let now = DispatchTime.now().uptimeNanoseconds
-                    if now - lastResizeTime > 300_000_000 {
-                        // Resize settled — recreate surface to fix GL state
-                        let w = pendingResizeW
-                        let h = pendingResizeH
-                        pendingResizeW = 0
-                        pendingResizeH = 0
-                        let widget = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
-                        gtk_gl_area_make_current(glArea)
-                        // Free old surface
-                        gApp.fn_surface_free?(surface)
-                        // Create new surface at new size
-                        let cwd = ws.cwd
-                        let home = ProcessInfo.processInfo.environment["HOME"] ?? ""
-                        let fullCwd = cwd.hasPrefix("~") ? home + String(cwd.dropFirst(1)) : cwd
-                        if gApp.createSurface(glArea: glArea, widget: widget, workingDirectory: fullCwd) {
-                            paneManager.registerSurface(glArea: glArea, surface: gApp.surface!)
-                            workspaceManager.workspaces[workspaceManager.activeIndex].surface = gApp.surface
-                            gApp.fn_surface_set_size?(gApp.surface!, UInt32(w), UInt32(h))
-                            gApp.fn_surface_set_focus?(gApp.surface!, true)
-                            cmuxLog("[resize] Recreated surface at \(w)x\(h)")
+
+            // Check for pending resize (settled for 300ms)
+            if pendingResizeW > 0 && pendingResizeH > 0 {
+                let now = DispatchTime.now().uptimeNanoseconds
+                if now - lastResizeTime > 300_000_000 {
+                    let w = pendingResizeW
+                    let h = pendingResizeH
+                    pendingResizeW = 0
+                    pendingResizeH = 0
+                    cmuxLog("[resize] Settled at \(w)x\(h), recreating surface...")
+                    // Recreate ALL workspace surfaces at the new size
+                    if let gApp = getGhosttyApp() {
+                        for i in 0..<workspaceManager.workspaces.count {
+                            let ws = workspaceManager.workspaces[i]
+                            guard let glArea = ws.glArea, let oldSurface = ws.surface else { continue }
+                            let widget = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
+                            gtk_gl_area_make_current(glArea)
+                            gApp.fn_surface_free?(oldSurface)
+                            let home = ProcessInfo.processInfo.environment["HOME"] ?? ""
+                            let cwd = ws.cwd
+                            let fullCwd = cwd.hasPrefix("~") ? home + String(cwd.dropFirst(1)) : cwd
+                            if gApp.createSurface(glArea: glArea, widget: widget, workingDirectory: fullCwd) {
+                                paneManager.registerSurface(glArea: glArea, surface: gApp.surface!)
+                                workspaceManager.workspaces[i].surface = gApp.surface
+                                gApp.fn_surface_set_size?(gApp.surface!, UInt32(w), UInt32(h))
+                            }
+                            cmuxLog("[resize] Recreated ws\(ws.id)")
                         }
                     }
                 }
+            }
+
+            // Re-read active surface AFTER any recreation
+            if let ws = workspaceManager.activeWorkspace, let glArea = ws.glArea,
+               let surface = ws.surface, let gApp = getGhosttyApp() {
                 gtk_gl_area_make_current(glArea)
                 gApp.fn_surface_set_focus?(surface, true)
                 gtk_gl_area_queue_render(glArea)
