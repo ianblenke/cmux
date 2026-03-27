@@ -18,6 +18,7 @@ Commands:
   cmux close                 Close active workspace
   cmux split [h|v]           Split pane (horizontal/vertical)
   cmux send <text>           Send text to active terminal
+  cmux browser [url]         Open browser in split
   cmux notify <title> [body] Send notification
 
 Environment:
@@ -94,6 +95,11 @@ for ws in data.get('result', []):
         send "{\"jsonrpc\":\"2.0\",\"method\":\"surface.send_text\",\"params\":{\"text\":\"$TEXT\"},\"id\":1}"
         ;;
 
+    browser|browse|open)
+        URL="${1:-https://google.com}"
+        send "{\"jsonrpc\":\"2.0\",\"method\":\"browser.open\",\"params\":{\"url\":\"$URL\"},\"id\":1}"
+        ;;
+
     notify)
         TITLE="${1:-Notification}"
         BODY="${2:-}"
@@ -112,6 +118,7 @@ Commands:
   cmux close                 Close active workspace
   cmux split [h|v]           Split pane (horizontal/vertical)
   cmux send <text>           Send text to active terminal
+  cmux browser [url]         Open browser in split
   cmux notify <title> [body] Send notification
 
 Environment:
