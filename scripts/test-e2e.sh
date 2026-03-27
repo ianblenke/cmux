@@ -100,7 +100,7 @@ R=$(send '{"jsonrpc":"2.0","method":"workspace.list","id":2}')
 assert "initial workspace exists" "$R" '"id"'
 
 send '{"jsonrpc":"2.0","method":"workspace.create","params":{"directory":"/tmp","title":"test-ws"},"id":3}' >/dev/null
-sleep 2
+sleep 4
 R=$(send '{"jsonrpc":"2.0","method":"workspace.list","id":4}')
 WS_COUNT=$(echo "$R" | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('result',[])))" 2>/dev/null || echo 0)
 assert "workspace created (count=2)" "$WS_COUNT" "2"

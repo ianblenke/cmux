@@ -62,7 +62,7 @@ final class WorkspaceManager {
         gtk_widget_set_focusable(newGlArea, 1)
         gtk_widget_set_can_focus(newGlArea, 1)
         let newGlPtr = unsafeBitCast(newGlArea, to: UnsafeMutablePointer<GtkGLArea>.self)
-        gtk_gl_area_set_auto_render(newGlPtr, 1)
+        gtk_gl_area_set_auto_render(newGlPtr, 0)  // Disabled until workspace becomes active
 
         ws.contentWidget = newGlArea
         ws.glArea = newGlPtr
@@ -159,8 +159,20 @@ final class WorkspaceManager {
     func showActiveInStack() {
         guard let nb = notebook else { return }
 
+        // Disable auto-render on ALL workspaces, enable only on active
+        for w in workspaces {
+            if let gl = w.glArea {
+                gtk_gl_area_set_auto_render(gl, 0)
+            }
+        }
+
         // Switch notebook page to active workspace
         gtk_notebook_set_current_page(nb, Int32(activeIndex))
+
+        // Enable auto-render on the active workspace
+        if let gl = activeWorkspace?.glArea {
+            gtk_gl_area_set_auto_render(gl, 1)
+        }
 
         // Focus and resize the newly visible workspace
         if let ws = activeWorkspace, let glArea = ws.glArea {
