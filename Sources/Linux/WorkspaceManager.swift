@@ -146,17 +146,26 @@ final class WorkspaceManager {
     func showActiveInStack() {
         guard let stack = stack else { return }
         guard let ws = activeWorkspace else { return }
-        // Use set_visible_child with the widget directly (avoids name lookup issues)
+        // Show the workspace's widget in the stack
         if let contentWidget = ws.contentWidget {
             gtk_stack_set_visible_child(stack, contentWidget)
         }
-        // Focus the GL area or content widget
-        if let glArea = ws.glArea {
-            let widget = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
-            _ = gtk_widget_grab_focus(widget)
-        } else if let contentWidget = ws.contentWidget {
-            _ = gtk_widget_grab_focus(contentWidget)
-        }
+        // Defer focus grab — widget must be visible and mapped first
+        g_idle_add({ _ -> gboolean in
+            if let ws = workspaceManager.activeWorkspace {
+                if let glArea = ws.glArea {
+                    let widget = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
+                    _ = gtk_widget_grab_focus(widget)
+                } else if let contentWidget = ws.contentWidget {
+                    _ = gtk_widget_grab_focus(contentWidget)
+                }
+                // Re-focus the ghostty surface
+                if let surface = ws.surface {
+                    ghosttyApp?.setFocusOnSurface(surface, focused: true)
+                }
+            }
+            return 0  // G_SOURCE_REMOVE
+        }, nil)
     }
 
     /// Switch to workspace at index
