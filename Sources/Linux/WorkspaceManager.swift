@@ -113,13 +113,19 @@ final class WorkspaceManager {
         g_signal_connect_data(newGlArea, "realize",
             unsafeBitCast(realizeCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
 
-        // Resize callback — just set size, tick timer handles focus
+        // Resize callback — only process for the active workspace's GL area
         let resizeCb: @convention(c) (UnsafeMutablePointer<GtkGLArea>?, Int32, Int32, gpointer?) -> Void = { glArea, w, h, _ in
-            guard w > 0, h > 0 else { return }
-            if let surface = workspaceManager.activeWorkspace?.surface,
-               let gApp = getGhosttyApp() {
-                gApp.fn_surface_set_size?(surface, UInt32(w), UInt32(h))
-            }
+            guard let glArea = glArea, w > 0, h > 0 else { return }
+            // Only resize if this is the active workspace's GL area
+            guard let activeWs = workspaceManager.activeWorkspace,
+                  activeWs.glArea == glArea,
+                  let surface = activeWs.surface,
+                  let gApp = getGhosttyApp() else { return }
+            gApp.fn_surface_set_size?(surface, UInt32(w), UInt32(h))
+            // Force full re-render after resize
+            gApp.fn_surface_refresh?(surface)
+            gtk_gl_area_queue_render(glArea)
+            cmuxLog("[resize] \(w)x\(h) active=ws\(activeWs.id)")
         }
         g_signal_connect_data(newGlArea, "resize",
             unsafeBitCast(resizeCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
@@ -155,19 +161,26 @@ final class WorkspaceManager {
         // Switch notebook page to active workspace
         gtk_notebook_set_current_page(nb, Int32(activeIndex))
 
-        // Focus the GL area and ghostty surface
+        // Focus and resize the newly visible workspace
         if let ws = activeWorkspace, let glArea = ws.glArea {
             let glWidget = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
             _ = gtk_widget_grab_focus(glWidget)
 
-            // Unfocus all, focus active
-            for w in workspaces {
-                if let s = w.surface, let gApp = getGhosttyApp() {
-                    gApp.fn_surface_set_focus?(s, false)
-                }
-            }
             if let surface = ws.surface, let gApp = getGhosttyApp() {
+                // Unfocus all, focus active
+                for w in workspaces {
+                    if let s = w.surface { gApp.fn_surface_set_focus?(s, false) }
+                }
                 gApp.fn_surface_set_focus?(surface, true)
+                // Re-apply size (may have changed while hidden)
+                let w = gtk_widget_get_width(glWidget)
+                let h = gtk_widget_get_height(glWidget)
+                if w > 0 && h > 0 {
+                    gApp.fn_surface_set_size?(surface, UInt32(w), UInt32(h))
+                    let scale = Double(gtk_widget_get_scale_factor(glWidget))
+                    gApp.fn_surface_set_content_scale?(surface, scale, scale)
+                }
+                gApp.fn_surface_refresh?(surface)
                 gtk_gl_area_queue_render(glArea)
             }
         }
