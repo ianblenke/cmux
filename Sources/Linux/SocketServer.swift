@@ -266,6 +266,14 @@ class SocketControlServer {
             }
             return errorResponse(id: id, code: -32602, message: "Missing 'key' parameter")
 
+        case "browser.open":
+            let url = request.params?["url"] ?? "https://google.com"
+            pendingSocketAction = { openBrowserInSplit(url: url) }
+            g_idle_add({ _ -> gboolean in
+                pendingSocketAction?(); pendingSocketAction = nil; return 0
+            }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
         case "notify":
             let title = request.params?["title"] ?? ""
             let body = request.params?["body"] ?? ""

@@ -1,0 +1,5 @@
+module CWebKit [system] {
+    header "webkit.h"
+    link "webkitgtk-6.0"
+    export *
+}

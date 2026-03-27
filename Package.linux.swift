@@ -25,10 +25,17 @@ let package = Package(
         ),
 
         // C module for libghostty
-        // Requires: zig build -Dapp-runtime=none in ghostty/
         .systemLibrary(
             name: "CGhostty",
             path: "Sources/CGhostty"
+        ),
+
+        // C module for WebKitGTK (browser panels)
+        .systemLibrary(
+            name: "CWebKit",
+            path: "Sources/CWebKit",
+            pkgConfig: "webkitgtk-6.0",
+            providers: [.apt(["libwebkitgtk-6.0-dev"])]
         ),
 
         // Platform Abstraction Layer — protocol definitions only
@@ -69,13 +76,14 @@ let package = Package(
         // Linux GTK4 application
         .executableTarget(
             name: "cmux-linux",
-            dependencies: ["cmux-pal", "cmux-core", "CGtk4", "CGhosttyHelpers"],
+            dependencies: ["cmux-pal", "cmux-core", "CGtk4", "CGhosttyHelpers", "CWebKit"],
             path: "Sources/Linux",
             linkerSettings: [
                 .linkedLibrary("gtk-4"),
                 .linkedLibrary("gio-2.0"),
                 .linkedLibrary("gobject-2.0"),
                 .linkedLibrary("glib-2.0"),
+                .linkedLibrary("webkitgtk-6.0"),
                 // libghostty loaded via dlopen to avoid Zig global init crash
                 // .unsafeFlags(["-Lghostty/zig-out/lib", "-Xlinker", "-rpath=ghostty/zig-out/lib"]),
                 // .linkedLibrary("ghostty"),

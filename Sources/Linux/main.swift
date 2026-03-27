@@ -289,6 +289,11 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
                     gApp.bindingAction("clear_screen")
                     return 1
                 }
+                // Super+L: open browser in split
+                if keyval == UInt32(GDK_KEY_l) || keyval == UInt32(GDK_KEY_L) {
+                    openBrowserInSplit(url: "https://google.com")
+                    return 1
+                }
                 // Super+B: toggle sidebar
                 if keyval == UInt32(GDK_KEY_b) || keyval == UInt32(GDK_KEY_B) {
                     workspaceManager.toggleSidebar()
