@@ -150,22 +150,10 @@ final class WorkspaceManager {
         if let contentWidget = ws.contentWidget {
             gtk_stack_set_visible_child(stack, contentWidget)
         }
-        // Defer focus grab — widget must be visible and mapped first
-        g_idle_add({ _ -> gboolean in
-            if let ws = workspaceManager.activeWorkspace {
-                if let glArea = ws.glArea {
-                    let widget = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
-                    _ = gtk_widget_grab_focus(widget)
-                } else if let contentWidget = ws.contentWidget {
-                    _ = gtk_widget_grab_focus(contentWidget)
-                }
-                // Re-focus the ghostty surface
-                if let surface = ws.surface {
-                    ghosttyApp?.setFocusOnSurface(surface, focused: true)
-                }
-            }
-            return 0  // G_SOURCE_REMOVE
-        }, nil)
+        // Direct focus grab — simpler and less crash-prone
+        if let contentWidget = ws.contentWidget {
+            _ = gtk_widget_grab_focus(contentWidget)
+        }
     }
 
     /// Switch to workspace at index
@@ -173,21 +161,16 @@ final class WorkspaceManager {
         guard index >= 0, index < workspaces.count else { return }
         guard index != activeIndex else { return }
 
-        // Unfocus current surface
-        if let currentSurface = activeSurface {
-            ghosttyApp?.setFocusOnSurface(currentSurface, focused: false)
-        }
-
         activeIndex = index
         clearUnread(index: index)
 
-        // Focus new surface
-        if let newSurface = activeSurface {
-            ghosttyApp?.setFocusOnSurface(newSurface, focused: true)
-        }
-
         // Switch visible child in GtkStack
         showActiveInStack()
+
+        // Queue GL render on the new active workspace
+        if let ws = activeWorkspace, let glArea = ws.glArea {
+            gtk_gl_area_queue_render(glArea)
+        }
 
         updateSidebar()
         updateWindowTitle()
