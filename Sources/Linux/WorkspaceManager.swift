@@ -742,45 +742,42 @@ final class WorkspaceManager {
         workspaces[activeIndex].splitSecondSurface = nil
         splitFocusedSecond = false
 
-        // Show the GtkStack and activate the workspace
+        // Show the GtkStack
         let stackWidget = unsafeBitCast(st, to: UnsafeMutablePointer<GtkWidget>.self)
         gtk_widget_set_visible(stackWidget, 1)
-        showActiveInStack()
+        globalGLArea = existingGlArea
 
-        // Refocus the remaining surface — both ghostty focus and GTK widget focus
-        if let s = ws.surface {
-            gApp.fn_surface_set_focus?(s, true)
-            _ = gtk_widget_grab_focus(existingWidget)
-            globalGLArea = existingGlArea
-            // Force resize to full window after reparenting
-            let w = gtk_widget_get_width(existingWidget)
-            let h = gtk_widget_get_height(existingWidget)
+        // Defer the full reactivation to let GTK finish the reparent layout.
+        // showActiveInStack + reinit_renderer need the widget to be fully
+        // realized in its new parent.
+        g_timeout_add(50, { _ -> gboolean in
+            guard let ws = workspaceManager.activeWorkspace,
+                  let surface = ws.surface,
+                  let glArea = ws.glArea,
+                  let gApp = getGhosttyApp() else { return 0 }
+            let widget = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
+
+            // Switch visible child and enable auto_render
+            workspaceManager.showActiveInStack()
+
+            // Reinitialize the renderer after reparenting
+            gtk_gl_area_make_current(glArea)
+            _ = gApp.fn_surface_reinit_renderer?(surface)
+
+            // Apply full size
+            let w = gtk_widget_get_width(widget)
+            let h = gtk_widget_get_height(widget)
             if w > 0 && h > 0 {
-                let scale = Double(gtk_widget_get_scale_factor(existingWidget))
-                gApp.fn_surface_set_content_scale?(s, scale, scale)
-                gApp.fn_surface_set_size?(s, UInt32(w), UInt32(h))
+                let scale = Double(gtk_widget_get_scale_factor(widget))
+                gApp.fn_surface_set_content_scale?(surface, scale, scale)
+                gApp.fn_surface_set_size?(surface, UInt32(w), UInt32(h))
             }
-            // Schedule a delayed resize to catch the final layout size
-            g_timeout_add(100, { _ -> gboolean in
-                if let ws = workspaceManager.activeWorkspace,
-                   let surface = ws.surface,
-                   let glArea = ws.glArea,
-                   let gApp = getGhosttyApp() {
-                    let widget = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
-                    let w = gtk_widget_get_width(widget)
-                    let h = gtk_widget_get_height(widget)
-                    if w > 0 && h > 0 {
-                        let scale = Double(gtk_widget_get_scale_factor(widget))
-                        gApp.fn_surface_set_content_scale?(surface, scale, scale)
-                        gApp.fn_surface_set_size?(surface, UInt32(w), UInt32(h))
-                        gApp.fn_surface_refresh?(surface)
-                        gtk_gl_area_queue_render(glArea)
-                        _ = gtk_widget_grab_focus(widget)
-                    }
-                }
-                return 0
-            }, nil)
-        }
+            gApp.fn_surface_set_focus?(surface, true)
+            gApp.fn_surface_refresh?(surface)
+            gtk_gl_area_queue_render(glArea)
+            _ = gtk_widget_grab_focus(widget)
+            return 0
+        }, nil)
 
         cmuxLog("[split] Closed split, restored single pane")
     }
