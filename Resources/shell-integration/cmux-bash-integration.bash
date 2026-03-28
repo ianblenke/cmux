@@ -496,7 +496,11 @@ _cmux_bash_cleanup() {
     _cmux_stop_pr_poll_loop
 }
 
+_CMUX_CMD_START_TIME="${_CMUX_CMD_START_TIME:-0}"
+_CMUX_NOTIFY_THRESHOLD="${CMUX_NOTIFY_THRESHOLD:-5}"
+
 _cmux_preexec_command() {
+    _CMUX_CMD_START_TIME=$SECONDS
     _cmux_tmux_sync_cmux_environment
 
     [[ -S "$CMUX_SOCKET_PATH" ]] || return 0
@@ -521,7 +525,18 @@ _cmux_bash_preexec_hook() {
 }
 
 _cmux_prompt_command() {
+    local _cmux_exit_status=$?
     _cmux_tmux_sync_cmux_environment
+
+    # Notify on long-running command completion (threshold: CMUX_NOTIFY_THRESHOLD seconds)
+    if (( _CMUX_CMD_START_TIME > 0 )); then
+        local elapsed=$(( SECONDS - _CMUX_CMD_START_TIME ))
+        _CMUX_CMD_START_TIME=0
+        if (( elapsed >= _CMUX_NOTIFY_THRESHOLD )); then
+            # Send OSC 777 desktop notification (handled by cmux → libnotify)
+            printf '\e]777;notify;Command finished;Completed in %ds (exit %d)\a' "$elapsed" "$_cmux_exit_status"
+        fi
+    fi
 
     [[ -S "$CMUX_SOCKET_PATH" ]] || return 0
     [[ -n "$CMUX_TAB_ID" ]] || return 0

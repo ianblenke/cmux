@@ -684,9 +684,21 @@ _cmux_preexec() {
     _cmux_start_git_head_watch
 }
 
+: ${CMUX_NOTIFY_THRESHOLD:=5}
+
 _cmux_precmd() {
+    local _cmux_exit_status=$?
     _cmux_stop_git_head_watch
     _cmux_tmux_sync_cmux_environment
+
+    # Notify on long-running command completion
+    if (( _CMUX_CMD_START > 0 )); then
+        local elapsed=$(( EPOCHSECONDS - _CMUX_CMD_START ))
+        _CMUX_CMD_START=0
+        if (( elapsed >= CMUX_NOTIFY_THRESHOLD )); then
+            printf '\e]777;notify;Command finished;Completed in %ds (exit %d)\a' "$elapsed" "$_cmux_exit_status"
+        fi
+    fi
 
     # Skip if socket doesn't exist yet
     [[ -S "$CMUX_SOCKET_PATH" ]] || return 0
