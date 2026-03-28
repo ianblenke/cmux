@@ -218,11 +218,13 @@ final class GhosttyApp {
                 }
                 if !t.isEmpty || !b.isEmpty {
                     workspaceManager.notifyActive(title: t, body: b)
+                    LinuxNotificationService.shared.post(title: t, body: b)
                 }
             },
             // Bell
             {
                 workspaceManager.bellActive()
+                LinuxNotificationService.shared.bell()
             }
         )
 

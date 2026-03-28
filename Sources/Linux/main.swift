@@ -437,6 +437,22 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
         cmuxLog("[cmux] Mouse input connected")
     }
 
+    // Track window focus for notification suppression
+    let focusController = gtk_event_controller_focus_new()!
+    let focusInCb: @convention(c) (OpaquePointer?, gpointer?) -> Void = { _, _ in
+        LinuxNotificationService.shared.clearUrgency()
+    }
+    let focusOutCb: @convention(c) (OpaquePointer?, gpointer?) -> Void = { _, _ in
+        LinuxNotificationService.shared.windowLostFocus()
+    }
+    g_signal_connect_data(UnsafeMutableRawPointer(focusController), "enter",
+        unsafeBitCast(focusInCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
+    g_signal_connect_data(UnsafeMutableRawPointer(focusController), "leave",
+        unsafeBitCast(focusOutCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
+    let addFocus: @convention(c) (UnsafeMutablePointer<GtkWidget>?, OpaquePointer?) -> Void = gtk_widget_add_controller
+    addFocus(unsafeBitCast(win, to: UnsafeMutablePointer<GtkWidget>.self), focusController)
+    cmuxLog("[cmux] Focus tracking connected")
+
     gtk_window_present(win)
 
     // Save session when window is closed
