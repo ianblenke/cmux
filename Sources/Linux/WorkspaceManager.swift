@@ -721,8 +721,10 @@ final class WorkspaceManager {
             paneManager.removeSurface(glArea: gl2)
         }
 
-        // Unparent both children from the GtkPaned before destroying it
+        // Ref the existing widget BEFORE unparenting — setting a paned child
+        // to nil unparents AND unrefs, which would destroy the widget.
         let existingWidget = unsafeBitCast(existingGlArea, to: UnsafeMutablePointer<GtkWidget>.self)
+        g_object_ref(UnsafeMutableRawPointer(existingWidget))
         let panedPtr = OpaquePointer(splitPaned)
         gtk_paned_set_start_child(panedPtr, nil)
         gtk_paned_set_end_child(panedPtr, nil)
@@ -734,6 +736,7 @@ final class WorkspaceManager {
         // Add the existing GtkGLArea back to the GtkStack
         let name = "ws-\(ws.id)"
         name.withCString { cName in gtk_stack_add_named(st, existingWidget, cName) }
+        g_object_unref(UnsafeMutableRawPointer(existingWidget))
 
         // Update workspace state BEFORE showActiveInStack
         workspaces[activeIndex].contentWidget = existingWidget
