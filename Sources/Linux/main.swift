@@ -79,7 +79,7 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
         cmuxLog("[cmux] Workspace \(wsId) created")
 
         // Restore additional workspaces from saved session
-        if let saved = LinuxSessionPersistence.load(), saved.workspaces.count > 1 {
+        if !noRestore, let saved = LinuxSessionPersistence.load(), saved.workspaces.count > 1 {
             for i in 1..<saved.workspaces.count {
                 let ws = saved.workspaces[i]
                 let home = ProcessInfo.processInfo.environment["HOME"] ?? ""
@@ -482,6 +482,7 @@ func cmuxLog(_ msg: String) {
 var initialCommand: String? = nil
 var initialDirectory: String? = nil
 var initialTitle: String? = nil
+var noRestore: Bool = false
 var filteredArgs: [String] = [CommandLine.arguments[0]]  // Keep program name
 
 do {
@@ -495,6 +496,8 @@ do {
             if i + 1 < args.count { initialDirectory = args[i + 1]; i += 2 } else { i += 1 }
         case "--title":
             if i + 1 < args.count { initialTitle = args[i + 1]; i += 2 } else { i += 1 }
+        case "--no-restore":
+            noRestore = true; i += 1
         case "--help", "-h":
             print("""
             cmux-linux — Ghostty-based terminal with workspaces

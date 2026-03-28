@@ -481,31 +481,33 @@ final class WorkspaceManager {
         }
     }
 
-    /// Split creates a new workspace with the same CWD.
-    /// Visual splits are blocked by two issues:
-    /// 1. GtkGLArea render signal doesn't fire in nested containers (GtkPaned/GtkBox in GtkStack)
-    /// 2. Two ghostty surfaces sharing one GtkGLArea causes the render loop to stall
-    ///    after a few frames (ghostty's GLAD/GL state conflicts between surfaces).
-    /// The ghostty fork has ghostty_surface_set_draw_framebuffer for FBO redirection,
-    /// and cmux has an FBO compositor (cmux_split_init/present). Single-surface FBO
-    /// redirect works (107+ frames). Two-surface draws stall after ~6 frames.
-    /// Fix requires ghostty to support multiple independent renderers per GL context.
+    /// Split by spawning a new cmux window with the same CWD.
+    /// In-process visual splits are blocked by GTK4's GtkGLArea render signal
+    /// not firing in nested containers, and ghostty's renderer assuming exclusive
+    /// GL context ownership. Spawning a separate window lets the WM (Cosmic, etc.)
+    /// handle tiling, and each window gets its own GL context.
     func splitActivePane(orientation: PaneSplit.SplitOrientation) {
         guard activeIndex >= 0, activeIndex < workspaces.count else { return }
-        guard let gApp = getGhosttyApp() else { return }
 
         let currentCwd = workspaces[activeIndex].cwd
-        let home = ProcessInfo.processInfo.environment["HOME"] ?? "/home"
-        let fullCwd: String? = currentCwd.hasPrefix("~")
-            ? home + String(currentCwd.dropFirst(1)) : (currentCwd == "~" ? home : currentCwd)
+        let home = ProcessInfo.processInfo.environment["HOME"] ?? ""
+        let fullCwd = currentCwd.hasPrefix("~")
+            ? home + String(currentCwd.dropFirst(1)) : currentCwd
 
-        let newId = createWorkspace(ghosttyApp: gApp, workingDirectory: fullCwd)
-        guard newId > 0 else {
-            cmuxLog("[split] Failed to create workspace")
-            return
+        let execPath = CommandLine.arguments[0]
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: execPath)
+        var args: [String] = ["--no-restore"]
+        if !fullCwd.isEmpty {
+            args += ["-d", fullCwd]
         }
-
-        cmuxLog("[split] Created workspace \(newId) (CWD inherited) — Super+[/] to switch")
+        process.arguments = args
+        do {
+            try process.run()
+            cmuxLog("[split] Spawned new window (pid=\(process.processIdentifier)) in \(fullCwd)")
+        } catch {
+            cmuxLog("[split] Failed to spawn: \(error)")
+        }
     }
 
     /// Close the focused pane within a split, collapsing the split
