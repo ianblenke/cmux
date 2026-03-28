@@ -104,14 +104,41 @@ func createTerminalPane(ghosttyApp: GhosttyApp, workingDirectory: String? = nil)
                 paneManager.registerSurface(glArea: glPtr, surface: surface)
                 let w = gtk_widget_get_width(widget)
                 let h = gtk_widget_get_height(widget)
+                let scale = Double(gtk_widget_get_scale_factor(widget))
+                gApp.fn_surface_set_content_scale?(surface, scale, scale)
                 if w > 0 && h > 0 {
                     gApp.fn_surface_set_size?(surface, UInt32(w), UInt32(h))
                 }
                 gApp.fn_surface_set_focus?(surface, true)
-                let scale = Double(gtk_widget_get_scale_factor(widget))
-                gApp.fn_surface_set_content_scale?(surface, scale, scale)
                 _ = gtk_widget_grab_focus(widget)
+                gApp.fn_surface_refresh?(surface)
+                gtk_gl_area_queue_render(glPtr)
                 cmuxLog("[pane] Surface created for pane, size \(w)x\(h)")
+
+                // If size is 0, schedule a delayed size application —
+                // the widget hasn't been size-allocated yet.
+                if w == 0 || h == 0 {
+                    let glRaw = UnsafeMutableRawPointer(glPtr)
+                    g_object_ref(glRaw)
+                    g_timeout_add(100, { userData -> gboolean in
+                        guard let userData = userData else { return 0 }
+                        let gl = userData.assumingMemoryBound(to: GtkGLArea.self)
+                        defer { g_object_unref(userData) }
+                        let w2 = unsafeBitCast(gl, to: UnsafeMutablePointer<GtkWidget>.self)
+                        let pw = gtk_widget_get_width(w2)
+                        let ph = gtk_widget_get_height(w2)
+                        if pw > 0 && ph > 0, let surface = paneManager.surfaceForGLArea(gl),
+                           let gApp = getGhosttyApp() {
+                            let scale = Double(gtk_widget_get_scale_factor(w2))
+                            gApp.fn_surface_set_content_scale?(surface, scale, scale)
+                            gApp.fn_surface_set_size?(surface, UInt32(pw), UInt32(ph))
+                            gApp.fn_surface_refresh?(surface)
+                            gtk_gl_area_queue_render(gl)
+                            cmuxLog("[pane] Deferred size applied: \(pw)x\(ph)")
+                        }
+                        return 0
+                    }, glRaw)
+                }
             } else {
                 cmuxLog("[pane] FAILED to create surface during deferred realize")
             }

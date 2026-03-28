@@ -103,9 +103,14 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
             // Resize is now handled immediately in the GtkGLArea resize callback.
             // No debounce needed — ghostty handles rapid set_size calls.
 
-            // Queue render on active workspace
-            if let ws = workspaceManager.activeWorkspace, let glArea = ws.glArea {
-                gtk_gl_area_queue_render(glArea)
+            // Queue render on active workspace (+ split pane if any)
+            if let ws = workspaceManager.activeWorkspace {
+                if let glArea = ws.glArea {
+                    gtk_gl_area_queue_render(glArea)
+                }
+                if let gl2 = ws.splitSecondGlArea {
+                    gtk_gl_area_queue_render(gl2)
+                }
             }
             return 1
         }, nil)
@@ -395,8 +400,37 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
             }
             gApp.mousePos(x: x, y: y, mods: 0)
             _ = gApp.mouseButton(state: 1, button: ghosttyButton, mods: 0)  // press
-            // Grab keyboard focus on click
-            if let glArea = globalGLArea {
+            // Handle split pane focus based on click position
+            if let ws = workspaceManager.activeWorkspace, ws.isSplit,
+               let splitPaned = ws.splitPanedWidget {
+                // Check if click is in the second pane by comparing to paned position
+                let panedOp = OpaquePointer(splitPaned)
+                let pos = gtk_paned_get_position(panedOp)
+                let orientation = gtk_orientable_get_orientation(panedOp)
+                let inSecond = orientation == GTK_ORIENTATION_VERTICAL ? y > Double(pos) : x > Double(pos)
+                if inSecond {
+                    workspaceManager.splitFocusedSecond = true
+                    if let s1 = ws.surface { gApp.fn_surface_set_focus?(s1, false) }
+                    let s2 = ws.splitSecondSurface ?? ws.splitSecondGlArea.flatMap({ paneManager.surfaceForGLArea($0) })
+                    if let s2 = s2 {
+                        gApp.fn_surface_set_focus?(s2, true)
+                        if ws.splitSecondSurface == nil {
+                            workspaceManager.workspaces[workspaceManager.activeIndex].splitSecondSurface = s2
+                        }
+                    }
+                    if let gl = ws.splitSecondGlArea {
+                        _ = gtk_widget_grab_focus(unsafeBitCast(gl, to: UnsafeMutablePointer<GtkWidget>.self))
+                    }
+                } else {
+                    workspaceManager.splitFocusedSecond = false
+                    let s2 = ws.splitSecondSurface ?? ws.splitSecondGlArea.flatMap({ paneManager.surfaceForGLArea($0) })
+                    if let s2 = s2 { gApp.fn_surface_set_focus?(s2, false) }
+                    if let s1 = ws.surface { gApp.fn_surface_set_focus?(s1, true) }
+                    if let gl = ws.glArea {
+                        _ = gtk_widget_grab_focus(unsafeBitCast(gl, to: UnsafeMutablePointer<GtkWidget>.self))
+                    }
+                }
+            } else if let glArea = globalGLArea {
                 let w = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
                 _ = gtk_widget_grab_focus(w)
             }
