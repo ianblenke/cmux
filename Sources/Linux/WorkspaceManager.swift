@@ -735,15 +735,17 @@ final class WorkspaceManager {
         let name = "ws-\(ws.id)"
         name.withCString { cName in gtk_stack_add_named(st, existingWidget, cName) }
 
-        // Show the GtkStack, update workspace state
-        let stackWidget = unsafeBitCast(st, to: UnsafeMutablePointer<GtkWidget>.self)
-        gtk_widget_set_visible(stackWidget, 1)
-        showActiveInStack()
-
+        // Update workspace state BEFORE showActiveInStack
+        workspaces[activeIndex].contentWidget = existingWidget
         workspaces[activeIndex].splitPanedWidget = nil
         workspaces[activeIndex].splitSecondGlArea = nil
         workspaces[activeIndex].splitSecondSurface = nil
         splitFocusedSecond = false
+
+        // Show the GtkStack and activate the workspace
+        let stackWidget = unsafeBitCast(st, to: UnsafeMutablePointer<GtkWidget>.self)
+        gtk_widget_set_visible(stackWidget, 1)
+        showActiveInStack()
 
         // Refocus the remaining surface — both ghostty focus and GTK widget focus
         if let s = ws.surface {
