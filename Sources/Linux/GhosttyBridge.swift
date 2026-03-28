@@ -75,9 +75,11 @@ private let closeSurfaceCb: @convention(c) (
     UnsafeMutableRawPointer?, Bool
 ) -> Void = { _, processActive in
     cmuxLog("[GhosttyBridge] Surface close requested (processActive=\(processActive))")
-    // Close the workspace when the shell exits
     g_idle_add({ _ -> gboolean in
-        if workspaceManager.workspaces.count > 1 {
+        // If the active workspace is split, collapse the split instead of closing
+        if let ws = workspaceManager.activeWorkspace, ws.isSplit {
+            workspaceManager.closeSplit()
+        } else if workspaceManager.workspaces.count > 1 {
             workspaceManager.closeActive()
         } else {
             // Last workspace — exit app

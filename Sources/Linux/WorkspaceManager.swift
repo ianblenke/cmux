@@ -744,9 +744,36 @@ final class WorkspaceManager {
         workspaces[activeIndex].splitSecondSurface = nil
         splitFocusedSecond = false
 
-        // Refocus the remaining surface
+        // Refocus the remaining surface and apply full size
         if let s = ws.surface {
             gApp.fn_surface_set_focus?(s, true)
+            // Force resize to full window after reparenting
+            let w = gtk_widget_get_width(existingWidget)
+            let h = gtk_widget_get_height(existingWidget)
+            if w > 0 && h > 0 {
+                let scale = Double(gtk_widget_get_scale_factor(existingWidget))
+                gApp.fn_surface_set_content_scale?(s, scale, scale)
+                gApp.fn_surface_set_size?(s, UInt32(w), UInt32(h))
+            }
+            // Schedule a delayed resize to catch the final layout size
+            g_timeout_add(100, { _ -> gboolean in
+                if let ws = workspaceManager.activeWorkspace,
+                   let surface = ws.surface,
+                   let glArea = ws.glArea,
+                   let gApp = getGhosttyApp() {
+                    let widget = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
+                    let w = gtk_widget_get_width(widget)
+                    let h = gtk_widget_get_height(widget)
+                    if w > 0 && h > 0 {
+                        let scale = Double(gtk_widget_get_scale_factor(widget))
+                        gApp.fn_surface_set_content_scale?(surface, scale, scale)
+                        gApp.fn_surface_set_size?(surface, UInt32(w), UInt32(h))
+                        gApp.fn_surface_refresh?(surface)
+                        gtk_gl_area_queue_render(glArea)
+                    }
+                }
+                return 0
+            }, nil)
         }
 
         cmuxLog("[split] Closed split, restored single pane")
