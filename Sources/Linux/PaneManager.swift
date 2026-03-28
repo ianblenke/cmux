@@ -79,27 +79,44 @@ func createTerminalPane(ghosttyApp: GhosttyApp, workingDirectory: String? = nil)
     g_signal_connect_data(glArea, "render",
         unsafeBitCast(renderCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
 
-    // Realize callback — create ghostty surface when GL is ready
+    // Realize callback — defer surface creation to idle so the GL context
+    // is fully initialized, even when nested inside containers within GtkStack.
     let realizeCb: @convention(c) (UnsafeMutablePointer<GtkWidget>?, gpointer?) -> Void = { widget, _ in
-        guard let widget = widget, getGhosttyApp() != nil else { return }
-        let gApp = getGhosttyApp()!
-        let glPtr = unsafeBitCast(widget, to: UnsafeMutablePointer<GtkGLArea>.self)
-        gtk_gl_area_make_current(glPtr)
+        guard let widget = widget else { return }
+        g_object_ref(UnsafeMutableRawPointer(widget))
+        g_idle_add({ userData -> gboolean in
+            guard let userData = userData else { return 0 }
+            let widget = userData.assumingMemoryBound(to: GtkWidget.self)
+            defer { g_object_unref(userData) }
 
-        let cwd = paneManager.getCwd(glArea: glPtr)
-        if gApp.createSurface(glArea: glPtr, widget: widget, workingDirectory: cwd) {
-            paneManager.registerSurface(glArea: glPtr, surface: gApp.surface!)
-            let w = gtk_widget_get_width(widget)
-            let h = gtk_widget_get_height(widget)
-            if w > 0 && h > 0 {
-                gApp.setSize(UInt32(w), UInt32(h))
+            guard let gApp = getGhosttyApp() else { return 0 }
+            let glPtr = unsafeBitCast(widget, to: UnsafeMutablePointer<GtkGLArea>.self)
+
+            gtk_gl_area_make_current(glPtr)
+            if let err = gtk_gl_area_get_error(glPtr) {
+                cmuxLog("[pane] GL error during realize: \(String(cString: err.pointee.message))")
+                return 0
             }
-            gApp.setFocus(true)
-            let scale = Double(gtk_widget_get_scale_factor(widget))
-            gApp.setContentScale(scale, scale)
-            _ = gtk_widget_grab_focus(widget)
-            cmuxLog("[pane] Surface created for pane, size \(w)x\(h)")
-        }
+
+            let cwd = paneManager.getCwd(glArea: glPtr)
+            if gApp.createSurface(glArea: glPtr, widget: widget, workingDirectory: cwd) {
+                let surface = gApp.surface!
+                paneManager.registerSurface(glArea: glPtr, surface: surface)
+                let w = gtk_widget_get_width(widget)
+                let h = gtk_widget_get_height(widget)
+                if w > 0 && h > 0 {
+                    gApp.fn_surface_set_size?(surface, UInt32(w), UInt32(h))
+                }
+                gApp.fn_surface_set_focus?(surface, true)
+                let scale = Double(gtk_widget_get_scale_factor(widget))
+                gApp.fn_surface_set_content_scale?(surface, scale, scale)
+                _ = gtk_widget_grab_focus(widget)
+                cmuxLog("[pane] Surface created for pane, size \(w)x\(h)")
+            } else {
+                cmuxLog("[pane] FAILED to create surface during deferred realize")
+            }
+            return 0
+        }, UnsafeMutableRawPointer(widget))
     }
     g_signal_connect_data(glArea, "realize",
         unsafeBitCast(realizeCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))

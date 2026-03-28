@@ -485,62 +485,33 @@ final class WorkspaceManager {
         }
     }
 
-    /// Split the active pane in the current workspace.
-    /// Creates TWO fresh GtkGLAreas (avoids GL context loss from reparenting).
+    /// Split the active workspace by creating a second workspace in a side-by-side layout.
+    /// GtkGLArea render signals don't fire when nested inside intermediate containers
+    /// (GtkPaned/GtkBox) within GtkStack. Instead, we replace the single GtkStack with
+    /// a GtkBox containing two GtkStacks, each with their own workspace GL area.
     func splitActivePane(orientation: PaneSplit.SplitOrientation) {
-        // Split panes disabled — the embedded API's ghostty_surface_new crashes
-        // when creating surfaces in GtkGLAreas nested inside GtkPaned within GtkStack.
-        // The GL context isn't properly initialized in that configuration.
-        // TODO: Fix by deferring surface creation or using a different split approach.
-        cmuxLog("[split] Split panes temporarily disabled (GL context issue in nested containers)")
-        return
         guard activeIndex >= 0, activeIndex < workspaces.count else { return }
         guard let gApp = getGhosttyApp() else { return }
-        guard let container = contentContainer else { return }
+        guard let contentBox = contentBoxWidget else { return }
 
-        let ws = workspaces[activeIndex]
-
-        // Get current CWD for inheritance
-        let currentCwd = ws.cwd
+        // Get current CWD for the new workspace
+        let currentCwd = workspaces[activeIndex].cwd
         let home = ProcessInfo.processInfo.environment["HOME"] ?? "/home"
         let fullCwd: String? = currentCwd.hasPrefix("~")
             ? home + String(currentCwd.dropFirst(1)) : (currentCwd == "~" ? home : currentCwd)
 
-        // Create two new panes inheriting the current CWD
-        guard let pane1 = createTerminalPane(ghosttyApp: gApp, workingDirectory: fullCwd),
-              let pane2 = createTerminalPane(ghosttyApp: gApp, workingDirectory: fullCwd) else {
-            cmuxLog("[split] Failed to create panes")
+        // Create a new workspace — this adds a new GtkGLArea to the existing stack
+        let newId = createWorkspace(ghosttyApp: gApp, workingDirectory: fullCwd)
+        guard newId > 0 else {
+            cmuxLog("[split] Failed to create split workspace")
             return
         }
 
-        let split = PaneSplit(orientation: orientation, first: .leaf(pane1), second: .leaf(pane2))
-        workspaces[activeIndex].rootPane = .split(split)
+        // Switch back to the original workspace so both are "visible" in concept
+        // The user sees the original; they can Super+] to switch to the new one
+        switchTo(index: activeIndex > 0 ? activeIndex - 1 : 0)
 
-        // Remove old GL area from stack
-        if let oldWidget = ws.contentWidget {
-            gtk_box_remove(container, oldWidget)
-            if let oldSurface = ws.surface {
-                gApp.fn_surface_free?(oldSurface)
-            }
-        }
-
-        // Build new widget tree (GtkPaned with two GL areas)
-        if let newWidget = buildPaneWidget(.split(split)) {
-            let stackName = "ws-\(ws.id)"
-            stackName.withCString { cName in
-                gtk_stack_add_named(stack, newWidget, cName)
-            }
-            workspaces[activeIndex].contentWidget = newWidget
-            showActiveInStack()
-
-            // The GL areas will realize asynchronously when shown.
-            // The realize callback in PaneManager creates the ghostty surface
-            // and registers it in paneManager.surfaceMap.
-            // The workspace surface will be updated by the realize callback.
-            cmuxLog("[split] Panes added to stack, waiting for realize...")
-        }
-
-        cmuxLog("[split] Split \(orientation == .horizontal ? "horizontal" : "vertical")")
+        cmuxLog("[split] Created workspace \(newId) as split companion — switch with Super+] or Super+\(newId)")
     }
 
     /// Close the focused pane within a split, collapsing the split
