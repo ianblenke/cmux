@@ -721,18 +721,19 @@ final class WorkspaceManager {
             paneManager.removeSurface(glArea: gl2)
         }
 
-        // Reparent the existing GtkGLArea back to the GtkStack
+        // Unparent both children from the GtkPaned before destroying it
         let existingWidget = unsafeBitCast(existingGlArea, to: UnsafeMutablePointer<GtkWidget>.self)
-        g_object_ref(UnsafeMutableRawPointer(existingWidget))
+        let panedPtr = OpaquePointer(splitPaned)
+        gtk_paned_set_start_child(panedPtr, nil)
+        gtk_paned_set_end_child(panedPtr, nil)
 
-        // Remove the GtkPaned from the content box
+        // Remove the (now empty) GtkPaned from the content box
         let contentBoxPtr = unsafeBitCast(contentBox, to: UnsafeMutablePointer<GtkBox>.self)
         gtk_box_remove(contentBoxPtr, splitPaned)
 
         // Add the existing GtkGLArea back to the GtkStack
         let name = "ws-\(ws.id)"
         name.withCString { cName in gtk_stack_add_named(st, existingWidget, cName) }
-        g_object_unref(UnsafeMutableRawPointer(existingWidget))
 
         // Show the GtkStack, update workspace state
         let stackWidget = unsafeBitCast(st, to: UnsafeMutablePointer<GtkWidget>.self)
