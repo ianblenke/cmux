@@ -745,9 +745,11 @@ final class WorkspaceManager {
         workspaces[activeIndex].splitSecondSurface = nil
         splitFocusedSecond = false
 
-        // Refocus the remaining surface and apply full size
+        // Refocus the remaining surface — both ghostty focus and GTK widget focus
         if let s = ws.surface {
             gApp.fn_surface_set_focus?(s, true)
+            _ = gtk_widget_grab_focus(existingWidget)
+            globalGLArea = existingGlArea
             // Force resize to full window after reparenting
             let w = gtk_widget_get_width(existingWidget)
             let h = gtk_widget_get_height(existingWidget)
@@ -771,6 +773,7 @@ final class WorkspaceManager {
                         gApp.fn_surface_set_size?(surface, UInt32(w), UInt32(h))
                         gApp.fn_surface_refresh?(surface)
                         gtk_gl_area_queue_render(glArea)
+                        _ = gtk_widget_grab_focus(widget)
                     }
                 }
                 return 0
