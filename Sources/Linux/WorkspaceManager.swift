@@ -704,6 +704,54 @@ final class WorkspaceManager {
         cmuxLog("[split] Visual split — GtkPaned direct, GtkStack hidden")
     }
 
+    /// Close the split, keeping the focused pane and restoring the GtkStack.
+    func closeSplit() {
+        guard activeIndex >= 0, activeIndex < workspaces.count else { return }
+        let ws = workspaces[activeIndex]
+        guard ws.isSplit, let splitPaned = ws.splitPanedWidget else { return }
+        guard let contentBox = contentBoxWidget, let st = stack else { return }
+        guard let gApp = getGhosttyApp() else { return }
+        guard let existingGlArea = ws.glArea else { return }
+
+        // Free the second surface
+        if let s2 = ws.splitSecondSurface ?? ws.splitSecondGlArea.flatMap({ paneManager.surfaceForGLArea($0) }) {
+            gApp.fn_surface_free?(s2)
+        }
+        if let gl2 = ws.splitSecondGlArea {
+            paneManager.removeSurface(glArea: gl2)
+        }
+
+        // Reparent the existing GtkGLArea back to the GtkStack
+        let existingWidget = unsafeBitCast(existingGlArea, to: UnsafeMutablePointer<GtkWidget>.self)
+        g_object_ref(UnsafeMutableRawPointer(existingWidget))
+
+        // Remove the GtkPaned from the content box
+        let contentBoxPtr = unsafeBitCast(contentBox, to: UnsafeMutablePointer<GtkBox>.self)
+        gtk_box_remove(contentBoxPtr, splitPaned)
+
+        // Add the existing GtkGLArea back to the GtkStack
+        let name = "ws-\(ws.id)"
+        name.withCString { cName in gtk_stack_add_named(st, existingWidget, cName) }
+        g_object_unref(UnsafeMutableRawPointer(existingWidget))
+
+        // Show the GtkStack, update workspace state
+        let stackWidget = unsafeBitCast(st, to: UnsafeMutablePointer<GtkWidget>.self)
+        gtk_widget_set_visible(stackWidget, 1)
+        showActiveInStack()
+
+        workspaces[activeIndex].splitPanedWidget = nil
+        workspaces[activeIndex].splitSecondGlArea = nil
+        workspaces[activeIndex].splitSecondSurface = nil
+        splitFocusedSecond = false
+
+        // Refocus the remaining surface
+        if let s = ws.surface {
+            gApp.fn_surface_set_focus?(s, true)
+        }
+
+        cmuxLog("[split] Closed split, restored single pane")
+    }
+
     /// Close the focused pane within a split, collapsing the split
     func closeFocusedPane() {
         guard activeIndex >= 0, activeIndex < workspaces.count else { return }

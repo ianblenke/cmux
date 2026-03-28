@@ -189,9 +189,13 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
                     cmuxLog("[cmux] Spawned new window (pid=\(process.processIdentifier))")
                     return 1
                 }
-                // Ctrl+Shift+W: close workspace
+                // Ctrl+Shift+W: close focused pane (if split) or workspace
                 if keyval == UInt32(GDK_KEY_w) || keyval == UInt32(GDK_KEY_W) {
-                    workspaceManager.closeActive()
+                    if workspaceManager.activeWorkspace?.isSplit == true {
+                        workspaceManager.closeSplit()
+                    } else {
+                        workspaceManager.closeActive()
+                    }
                     return 1
                 }
                 // Ctrl+Shift+F: search/find in terminal
@@ -240,11 +244,10 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
                     workspaceManager.closeActive()
                     return 1
                 }
-                // Super+Shift+W: close focused pane (not workspace)
+                // Super+Shift+W: close focused pane (if split) or workspace
                 if isShift && (keyval == UInt32(GDK_KEY_w) || keyval == UInt32(GDK_KEY_W)) {
-                    // If we have splits, close the focused pane; otherwise close workspace
-                    if workspaceManager.workspaces[workspaceManager.activeIndex].rootPane != nil {
-                        workspaceManager.closeFocusedPane()
+                    if workspaceManager.activeWorkspace?.isSplit == true {
+                        workspaceManager.closeSplit()
                     } else {
                         workspaceManager.closeActive()
                     }

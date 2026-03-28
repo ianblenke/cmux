@@ -569,6 +569,13 @@ class SocketControlServer {
             }, nil)
             return successResponse(id: id, result: ["ok": "true"])
 
+        case "surface.split.close":
+            pendingSocketAction = { workspaceManager.closeSplit() }
+            g_idle_add({ _ -> gboolean in
+                pendingSocketAction?(); pendingSocketAction = nil; return 0
+            }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
         case "surface.create":
             let dir = request.params?["directory"]
             let title = request.params?["title"]

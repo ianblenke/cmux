@@ -465,20 +465,23 @@ final class GhosttyApp {
     /// state: 0=release, 1=press
     /// button: 1=left, 2=right, 3=middle
     func mouseButton(state: Int32, button: Int32, mods: Int32) -> Bool {
-        guard let surface = surface, let fn = fn_surface_mouse_button else { return false }
-        return fn(surface, state, button, mods)
+        let target = workspaceManager.activeSurface ?? surface
+        guard let target = target, let fn = fn_surface_mouse_button else { return false }
+        return fn(target, state, button, mods)
     }
 
     /// Mouse position update
     func mousePos(x: Double, y: Double, mods: Int32) {
-        guard let surface = surface, let fn = fn_surface_mouse_pos else { return }
-        fn(surface, x, y, mods)
+        let target = workspaceManager.activeSurface ?? surface
+        guard let target = target, let fn = fn_surface_mouse_pos else { return }
+        fn(target, x, y, mods)
     }
 
     /// Mouse scroll
     func mouseScroll(dx: Double, dy: Double, mods: Int32) {
-        guard let surface = surface, let fn = fn_surface_mouse_scroll else { return }
-        fn(surface, dx, dy, mods)
+        let target = workspaceManager.activeSurface ?? surface
+        guard let target = target, let fn = fn_surface_mouse_scroll else { return }
+        fn(target, dx, dy, mods)
     }
 
     // MARK: - Rendering
