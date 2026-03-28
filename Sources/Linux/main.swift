@@ -196,7 +196,7 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
                 }
                 // Ctrl+Shift+F: search/find in terminal
                 if keyval == UInt32(GDK_KEY_f) || keyval == UInt32(GDK_KEY_F) {
-                    gApp.bindingAction("search")
+                    gApp.bindingAction("start_search")
                     return 1
                 }
                 // Ctrl+Shift+,: reload config

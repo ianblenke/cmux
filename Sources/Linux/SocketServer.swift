@@ -622,6 +622,48 @@ class SocketControlServer {
             ])
 
         // ============================================================
+        // SEARCH COMMANDS
+        // ============================================================
+
+        case "surface.find.start":
+            // Start search, optionally with initial query
+            let query = request.params?["query"] ?? ""
+            let action = query.isEmpty ? "start_search" : "search:\(query)"
+            if let surface = workspaceManager.activeSurface,
+               let gApp = getGhosttyApp() {
+                gApp.fn_surface_binding_action?(surface, action, UInt(action.utf8.count))
+                return successResponse(id: id, result: ["ok": "true"])
+            }
+            return errorResponse(id: id, code: -32000, message: "No active surface")
+
+        case "surface.find.next":
+            if let surface = workspaceManager.activeSurface,
+               let gApp = getGhosttyApp() {
+                let action = "navigate_search:next"
+                gApp.fn_surface_binding_action?(surface, action, UInt(action.utf8.count))
+                return successResponse(id: id, result: ["ok": "true"])
+            }
+            return errorResponse(id: id, code: -32000, message: "No active surface")
+
+        case "surface.find.previous":
+            if let surface = workspaceManager.activeSurface,
+               let gApp = getGhosttyApp() {
+                let action = "navigate_search:previous"
+                gApp.fn_surface_binding_action?(surface, action, UInt(action.utf8.count))
+                return successResponse(id: id, result: ["ok": "true"])
+            }
+            return errorResponse(id: id, code: -32000, message: "No active surface")
+
+        case "surface.find.end":
+            if let surface = workspaceManager.activeSurface,
+               let gApp = getGhosttyApp() {
+                let action = "end_search"
+                gApp.fn_surface_binding_action?(surface, action, UInt(action.utf8.count))
+                return successResponse(id: id, result: ["ok": "true"])
+            }
+            return errorResponse(id: id, code: -32000, message: "No active surface")
+
+        // ============================================================
         // PANE COMMANDS (stubs for split pane support)
         // ============================================================
 
@@ -1310,6 +1352,7 @@ class SocketControlServer {
             "surface.create", "surface.close", "surface.send_text", "surface.send_key",
             "surface.pty_write", "surface.read_text", "surface.clear_history",
             "surface.refresh", "surface.health", "surface.size",
+            "surface.find.start", "surface.find.next", "surface.find.previous", "surface.find.end",
             "surface.move", "surface.reorder", "surface.drag_to_split",
             "surface.trigger_flash", "surface.action", "tab.action",
             // Pane
