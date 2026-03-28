@@ -437,8 +437,9 @@ final class GhosttyApp {
 
     /// Copy terminal selection to GDK clipboard. Returns true if copied.
     func copySelection() -> Bool {
-        guard let surface = surface else { return false }
-        guard let cStr = cmux_ghostty_copy_selection(surface) else { return false }
+        let target = workspaceManager.activeSurface ?? surface
+        guard let target = target else { return false }
+        guard let cStr = cmux_ghostty_copy_selection(target) else { return false }
         let text = String(cString: cStr)
         free(cStr)
         if let display = gdk_display_get_default() {

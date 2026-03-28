@@ -1360,6 +1360,7 @@ class SocketControlServer {
             "surface.pty_write", "surface.read_text", "surface.clear_history",
             "surface.refresh", "surface.health", "surface.size",
             "surface.find.start", "surface.find.next", "surface.find.previous", "surface.find.end",
+            "surface.split.close",
             "surface.move", "surface.reorder", "surface.drag_to_split",
             "surface.trigger_flash", "surface.action", "tab.action",
             // Pane
