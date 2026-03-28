@@ -17,6 +17,8 @@ struct Workspace {
     var lastNotification: String?
     var rootPane: PaneNode?
     var contentWidget: UnsafeMutablePointer<GtkWidget>?
+    var ptyMasterFd: Int32 = -1  // PTY master fd for direct writes
+    var needsSurfaceRecreate: Bool = false  // Set when hidden during a resize
 
     init(id: Int, title: String? = nil, cwd: String = "~") {
         self.id = id
@@ -34,7 +36,6 @@ final class WorkspaceManager {
     var sidebarBox: UnsafeMutablePointer<GtkBox>?
     var glArea: UnsafeMutablePointer<GtkGLArea>?  // Legacy — used for splits only
     var window: UnsafeMutablePointer<GtkWindow>?
-    var stack: OpaquePointer?  // GtkStack — one child per workspace
 
     var activeWorkspace: Workspace? {
         guard activeIndex >= 0, activeIndex < workspaces.count else { return nil }
@@ -45,7 +46,67 @@ final class WorkspaceManager {
         return activeWorkspace?.surface
     }
 
-    /// Create a new workspace with its OWN GtkGLArea and ghostty surface
+    /// PTY master fd for the active workspace
+    var activePtyFd: Int32 {
+        return activeWorkspace?.ptyMasterFd ?? -1
+    }
+
+    /// Rescan PTY master fds for workspaces that don't have one assigned.
+    /// The PTY is opened asynchronously by ghostty's IO thread after surface creation.
+    func rescanPtyFds() {
+        // First, verify existing assignments are still valid
+        for i in 0..<workspaces.count {
+            if workspaces[i].ptyMasterFd >= 0 {
+                // Check if the fd is still open and pointing to ptmx
+                var target = [CChar](repeating: 0, count: 256)
+                let len = readlink("/proc/self/fd/\(workspaces[i].ptyMasterFd)", &target, 255)
+                if len <= 0 || !String(cString: target).contains("ptmx") {
+                    cmuxLog("[workspace] PTY fd=\(workspaces[i].ptyMasterFd) is stale for workspace \(workspaces[i].id)")
+                    workspaces[i].ptyMasterFd = -1
+                }
+            }
+        }
+
+        let allPtmx = WorkspaceManager.findPtmxFds()
+        let assignedFds = Set(workspaces.compactMap { $0.ptyMasterFd > 0 ? $0.ptyMasterFd : nil })
+        let unassigned = allPtmx.subtracting(assignedFds).sorted()
+
+        // Assign unassigned fds to workspaces missing them (in order)
+        var unassignedIdx = 0
+        for i in 0..<workspaces.count {
+            if workspaces[i].ptyMasterFd < 0 && workspaces[i].surface != nil {
+                if unassignedIdx < unassigned.count {
+                    workspaces[i].ptyMasterFd = unassigned[unassignedIdx]
+                    cmuxLog("[workspace] Late-assigned PTY master fd=\(unassigned[unassignedIdx]) for workspace \(workspaces[i].id)")
+                    unassignedIdx += 1
+                }
+            }
+        }
+    }
+
+    /// Find all open ptmx file descriptors in /proc/self/fd
+    static func findPtmxFds() -> Set<Int32> {
+        var fds = Set<Int32>()
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(atPath: "/proc/self/fd") else {
+            cmuxLog("[ptmx] Failed to list /proc/self/fd")
+            return fds
+        }
+        for entry in entries {
+            guard let fdNum = Int32(entry) else { continue }
+            var target = [CChar](repeating: 0, count: 256)
+            let len = readlink("/proc/self/fd/\(entry)", &target, 255)
+            if len > 0 {
+                let path = String(cString: target)
+                if path.contains("ptmx") {
+                    fds.insert(fdNum)
+                }
+            }
+        }
+        return fds
+    }
+
+    /// Create a new workspace with its own GtkGLArea and ghostty surface
     func createWorkspace(ghosttyApp: GhosttyApp,
                          glArea: UnsafeMutablePointer<GtkGLArea>? = nil,
                          widget: UnsafeMutablePointer<GtkWidget>? = nil,
@@ -55,57 +116,54 @@ final class WorkspaceManager {
         var ws = Workspace(id: id)
         if let title = title { ws.title = "\(id): \(title)" }
 
-        // Create a NEW GtkGLArea for this workspace
         guard let newGlArea = gtk_gl_area_new() else { return 0 }
         gtk_widget_set_hexpand(newGlArea, 1)
         gtk_widget_set_vexpand(newGlArea, 1)
         gtk_widget_set_focusable(newGlArea, 1)
         gtk_widget_set_can_focus(newGlArea, 1)
         let newGlPtr = unsafeBitCast(newGlArea, to: UnsafeMutablePointer<GtkGLArea>.self)
-        gtk_gl_area_set_auto_render(newGlPtr, 0)  // Disabled until workspace becomes active
+        gtk_gl_area_set_auto_render(newGlPtr, 0)
 
         ws.contentWidget = newGlArea
         ws.glArea = newGlPtr
 
-        // Store creation params for the realize callback
-        let wsIndex = workspaces.count  // Index this workspace will have
         paneManager.setCwd(glArea: newGlPtr, cwd: workingDirectory ?? "")
 
-        // Render callback — ONLY draw if this is the active workspace
+        // Render callback
         let renderCb: @convention(c) (UnsafeMutablePointer<GtkGLArea>?, OpaquePointer?, gpointer?) -> gboolean = { glArea, ctx, _ in
-            // Skip rendering for non-active workspaces
             guard let activeWs = workspaceManager.activeWorkspace,
                   activeWs.glArea == glArea else { return 1 }
-            if let surface = activeWs.surface,
-               let gApp = getGhosttyApp() {
+            if let surface = activeWs.surface, let gApp = getGhosttyApp() {
                 gApp.drawSurface(surface)
+            } else {
+                cmuxLog("[render] SKIP: no surface or ghostty app")
             }
             return 1
         }
         g_signal_connect_data(newGlArea, "render",
             unsafeBitCast(renderCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
 
-        // Realize callback — create ghostty surface when GL is ready
+        // Realize callback
         let realizeCb: @convention(c) (UnsafeMutablePointer<GtkWidget>?, gpointer?) -> Void = { widget, _ in
             guard let widget = widget, let gApp = getGhosttyApp() else { return }
             let glPtr = unsafeBitCast(widget, to: UnsafeMutablePointer<GtkGLArea>.self)
             gtk_gl_area_make_current(glPtr)
-
+            let usedFds = Set(workspaceManager.workspaces.compactMap { $0.ptyMasterFd > 0 ? $0.ptyMasterFd : nil })
             let cwd = paneManager.getCwd(glArea: glPtr)
             if gApp.createSurface(glArea: glPtr, widget: widget, workingDirectory: cwd) {
                 paneManager.registerSurface(glArea: glPtr, surface: gApp.surface!)
-                // Find and update the workspace that owns this GL area
+                let allPtmx = WorkspaceManager.findPtmxFds()
+                let ptyFd = allPtmx.subtracting(usedFds).max() ?? -1
                 for i in 0..<workspaceManager.workspaces.count {
                     if workspaceManager.workspaces[i].glArea == glPtr {
                         workspaceManager.workspaces[i].surface = gApp.surface
+                        workspaceManager.workspaces[i].ptyMasterFd = ptyFd
                         break
                     }
                 }
                 let w = gtk_widget_get_width(widget)
                 let h = gtk_widget_get_height(widget)
-                if w > 0 && h > 0 {
-                    gApp.fn_surface_set_size?(gApp.surface!, UInt32(w), UInt32(h))
-                }
+                if w > 0 && h > 0 { gApp.fn_surface_set_size?(gApp.surface!, UInt32(w), UInt32(h)) }
                 gApp.fn_surface_set_focus?(gApp.surface!, true)
                 let scale = Double(gtk_widget_get_scale_factor(widget))
                 gApp.fn_surface_set_content_scale?(gApp.surface!, scale, scale)
@@ -116,29 +174,48 @@ final class WorkspaceManager {
         g_signal_connect_data(newGlArea, "realize",
             unsafeBitCast(realizeCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
 
-        // Resize callback — store pending, debounce to avoid flood
+        // Resize callback — apply size to ghostty immediately
         let resizeCb: @convention(c) (UnsafeMutablePointer<GtkGLArea>?, Int32, Int32, gpointer?) -> Void = { glArea, w, h, _ in
             guard let glArea = glArea, w > 0, h > 0 else { return }
-            guard let activeWs = workspaceManager.activeWorkspace,
-                  activeWs.glArea == glArea else { return }
-            pendingResizeW = w
-            pendingResizeH = h
-            lastResizeTime = DispatchTime.now().uptimeNanoseconds
+            cmuxLog("[resize] Signal fired: \(w)x\(h) glArea=\(glArea)")
+            guard let surface = workspaceManager.activeSurface,
+                  let gApp = getGhosttyApp() else {
+                cmuxLog("[resize] SKIP: no active surface")
+                return
+            }
+            let widget = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
+            let scale = Double(gtk_widget_get_scale_factor(widget))
+            gApp.fn_surface_set_content_scale?(surface, scale, scale)
+            gApp.fn_surface_set_size?(surface, UInt32(w), UInt32(h))
+            workspaceManager.lastResizeW = w
+            workspaceManager.lastResizeH = h
+            // Schedule a delayed refresh to give the IO thread time to process
+            // the resize and rebuild cell buffers before the renderer draws
+            g_timeout_add(50, { _ -> gboolean in
+                if let ws = workspaceManager.activeWorkspace,
+                   let surface = ws.surface,
+                   let glArea = ws.glArea,
+                   let gApp = getGhosttyApp() {
+                    gApp.fn_surface_refresh?(surface)
+                    gtk_gl_area_queue_render(glArea)
+                }
+                return 0  // don't repeat
+            }, nil)
         }
         g_signal_connect_data(newGlArea, "resize",
             unsafeBitCast(resizeCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
 
         ws.contentWidget = newGlArea
 
-        // Add to notebook (keeps widget realized even when not visible)
-        if let nb = notebook {
-            gtk_notebook_append_page(nb, newGlArea, nil)
+        if let st = stack {
+            let name = "ws-\(id)"
+            name.withCString { cName in
+                gtk_stack_add_named(st, newGlArea, cName)
+            }
         }
 
         workspaces.append(ws)
         activeIndex = workspaces.count - 1
-
-        // Show this workspace in the stack
         showActiveInStack()
 
         updateSidebar()
@@ -146,30 +223,34 @@ final class WorkspaceManager {
         return id
     }
 
-    /// Show the active workspace's GL area in the stack
-    /// GtkNotebook with hidden tabs — each page is a workspace GL area
-    var notebook: OpaquePointer?  // GtkNotebook*
-    /// Last resize dimensions (applied to hidden workspaces when they become visible)
+    /// GtkStack — only the visible child gets size-allocated.
+    /// Hidden children keep their old GL state intact.
+    var stack: OpaquePointer?  // GtkStack*
+    // notebook is now stack — use stack directly
+    /// Last resize dimensions
     var lastResizeW: Int32 = 0
     var lastResizeH: Int32 = 0
-    /// Legacy container reference
+    var hiddenDetached: Bool = false
+    var pendingRendererReinit: Bool = false
     var contentContainer: UnsafeMutablePointer<GtkBox>?
     var currentDisplayedWidget: UnsafeMutablePointer<GtkWidget>?
 
     func showActiveInStack() {
-        guard let nb = notebook else { return }
+        guard let st = stack else { return }
 
-        // Disable auto-render on ALL workspaces, enable only on active
+        // Disable auto-render on all, enable only active
         for w in workspaces {
-            if let gl = w.glArea {
-                gtk_gl_area_set_auto_render(gl, 0)
+            if let gl = w.glArea { gtk_gl_area_set_auto_render(gl, 0) }
+        }
+
+        // Switch visible child in GtkStack
+        if let ws = activeWorkspace, let widget = ws.contentWidget {
+            let name = "ws-\(ws.id)"
+            name.withCString { cName in
+                gtk_stack_set_visible_child_name(st, cName)
             }
         }
 
-        // Switch notebook page to active workspace
-        gtk_notebook_set_current_page(nb, Int32(activeIndex))
-
-        // Enable auto-render on the active workspace
         if let gl = activeWorkspace?.glArea {
             gtk_gl_area_set_auto_render(gl, 1)
         }
@@ -177,20 +258,78 @@ final class WorkspaceManager {
         // Focus and resize the newly visible workspace
         if let ws = activeWorkspace, let glArea = ws.glArea {
             let glWidget = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
-
             if let surface = ws.surface, let gApp = getGhosttyApp() {
                 gApp.fn_surface_set_focus?(surface, true)
-                // Apply stored resize if window was resized while this workspace was hidden
+                // Apply stored resize if window was resized while hidden
                 if lastResizeW > 0 && lastResizeH > 0 {
                     gtk_gl_area_make_current(glArea)
                     gApp.fn_surface_set_size?(surface, UInt32(lastResizeW), UInt32(lastResizeH))
-                    gApp.fn_surface_refresh?(surface)
+                    let scale = Double(gtk_widget_get_scale_factor(glWidget))
+                    gApp.fn_surface_set_content_scale?(surface, scale, scale)
                 }
+                gApp.fn_surface_refresh?(surface)
                 gtk_gl_area_queue_render(glArea)
             }
-
             _ = gtk_widget_grab_focus(glWidget)
         }
+    }
+
+    // Surface recreation and PTY fd management methods below
+
+    /// Recreate the ghostty surface for a workspace whose GL state was corrupted by resize.
+    /// This destroys the old surface and creates a new one on the same GL area,
+    /// preserving the workspace's CWD. The old shell session is lost.
+    func recreateSurface(at index: Int, ghosttyApp gApp: GhosttyApp) {
+        guard index >= 0, index < workspaces.count else { return }
+        let ws = workspaces[index]
+        guard let glArea = ws.glArea else { return }
+
+        // Free the old surface (ghostty closes the PTY master fd internally)
+        if let oldSurface = ws.surface {
+            gApp.fn_surface_free?(oldSurface)
+            workspaces[index].ptyMasterFd = -1
+            workspaces[index].surface = nil
+            cmuxLog("[workspace] Freed old surface for workspace \(ws.id)")
+        }
+
+        // Get the CWD from the workspace
+        let cwd = ws.cwd.hasPrefix("~")
+            ? (ProcessInfo.processInfo.environment["HOME"] ?? "") + String(ws.cwd.dropFirst(1))
+            : ws.cwd
+
+        // Snapshot existing PTY fds
+        let usedFds = Set(workspaces.enumerated().compactMap { (i, w) in
+            i != index && w.ptyMasterFd > 0 ? w.ptyMasterFd : nil
+        })
+
+        // Create new surface on the same GL area
+        let glWidget = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
+        gtk_gl_area_make_current(glArea)
+        if gApp.createSurface(glArea: glArea, widget: glWidget, workingDirectory: cwd.isEmpty ? nil : cwd) {
+            paneManager.registerSurface(glArea: glArea, surface: gApp.surface!)
+            workspaces[index].surface = gApp.surface
+
+            // PTY fd will be assigned lazily by rescanPtyFds when pty_write is called
+            // (the PTY opens asynchronously in ghostty's IO thread)
+            workspaces[index].ptyMasterFd = -1
+
+            // Apply current window size
+            let w = gtk_widget_get_width(glWidget)
+            let h = gtk_widget_get_height(glWidget)
+            if w > 0 && h > 0 {
+                gApp.fn_surface_set_size?(gApp.surface!, UInt32(w), UInt32(h))
+            }
+            let scale = Double(gtk_widget_get_scale_factor(glWidget))
+            gApp.fn_surface_set_content_scale?(gApp.surface!, scale, scale)
+            gApp.fn_surface_set_focus?(gApp.surface!, true)
+            gApp.fn_surface_refresh?(gApp.surface!)
+
+            cmuxLog("[workspace] Surface recreated for workspace \(ws.id), ptyFd=\(workspaces[index].ptyMasterFd)")
+        } else {
+            cmuxLog("[workspace] FAILED to recreate surface for workspace \(ws.id)")
+        }
+
+        workspaces[index].needsSurfaceRecreate = false
     }
 
     /// Switch to workspace at index
@@ -453,13 +592,8 @@ final class WorkspaceManager {
         let removed = workspaces.remove(at: activeIndex)
         cmuxLog("[workspace] Closed workspace \(removed.id)")
 
-        // Remove page from notebook
-        if let nb = notebook {
-            // Find and remove the page for this workspace
-            let pageNum = gtk_notebook_page_num(nb, removed.contentWidget)
-            if pageNum >= 0 {
-                gtk_notebook_remove_page(nb, pageNum)
-            }
+        if let st = stack, let widget = removed.contentWidget {
+            gtk_stack_remove(st, widget)
         }
 
         // Free the surface

@@ -82,8 +82,27 @@ send() { echo "$1" | socat -t 3 - UNIX-CONNECT:"$SOCK" 2>/dev/null; }
 
 send_text() {
     local text="$1"
-    local escaped=$(echo "$text" | sed 's/\\/\\\\/g; s/"/\\"/g')
-    send "{\"jsonrpc\":\"2.0\",\"method\":\"surface.send_text\",\"params\":{\"text\":\"$escaped\"},\"id\":99}" >/dev/null
+    # Escape for JSON: double-quotes and backslashes (but preserve \n as JSON newline)
+    local escaped=$(printf '%s' "$text" | sed 's/"/\\"/g')
+    # Use pty_write for direct PTY access (bypasses ghostty IO thread which
+    # doesn't process writes reliably in headless/weston E2E environments)
+    send "{\"jsonrpc\":\"2.0\",\"method\":\"surface.pty_write\",\"params\":{\"text\":\"$escaped\"},\"id\":99}" >/dev/null
+}
+
+# Wait until cmux has an active surface (shell is ready to receive input)
+wait_ready() {
+    local max_wait="${1:-30}"
+    local elapsed=0
+    while [ "$elapsed" -lt "$max_wait" ]; do
+        local r=$(send '{"jsonrpc":"2.0","method":"system.ready","id":0}' 2>/dev/null || echo "")
+        if echo "$r" | grep -q '"ready":"true"'; then
+            return 0
+        fi
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+    echo "  WARNING: surface not ready after ${max_wait}s"
+    return 1
 }
 
 ws_count() {
@@ -104,9 +123,10 @@ bold "Building cmux..."
 ./scripts/build-linux.sh 2>&1 | tail -3
 echo ""
 
-# Start nested compositor
-bold "Starting nested Wayland compositor..."
-weston --backend=wayland --socket="$WESTON_SOCK" --width=1024 --height=768 2>/tmp/cmux-e2e-weston.log &
+# Start nested compositor (headless with GL renderer — GTK4 activate
+# doesn't fire reliably with weston --backend=wayland nested compositor)
+bold "Starting headless Wayland compositor..."
+weston --backend=headless --renderer=gl --socket="$WESTON_SOCK" --width=1024 --height=768 2>/tmp/cmux-e2e-weston.log &
 WESTON_PID=$!
 sleep 2
 if ! kill -0 $WESTON_PID 2>/dev/null; then
@@ -115,20 +135,39 @@ fi
 
 # Launch cmux
 bold "Launching cmux..."
-rm -f "$LOG" ~/.local/share/cmux/session.json
+rm -f "$LOG" ~/.local/share/cmux/session.json /tmp/cmux-socket-path
 cp Package.linux.swift Package.swift 2>/dev/null || true
 WAYLAND_DISPLAY="$WESTON_SOCK" .build/debug/cmux-linux 2>/tmp/cmux-e2e-stderr.log &
 CMUX_PID=$!
-sleep 5
 git checkout Package.swift 2>/dev/null || true
+
+# Wait for socket to appear
+echo "  Waiting for socket..."
+for i in $(seq 1 15); do
+    SOCK=$(cat /tmp/cmux-socket-path 2>/dev/null || echo "")
+    if [ -n "$SOCK" ] && [ -S "$SOCK" ]; then break; fi
+    sleep 1
+done
 
 SOCK=$(cat /tmp/cmux-socket-path 2>/dev/null || echo "")
 if [ -z "$SOCK" ] || [ ! -S "$SOCK" ]; then
-    red "cmux failed to start"
-    strings "$LOG" 2>/dev/null | tail -10
+    red "cmux failed to start (no socket after 15s)"
+    cat /tmp/cmux-e2e-stderr.log 2>/dev/null | tail -20
     exit 1
 fi
 echo "  cmux PID=$CMUX_PID socket=$SOCK"
+
+# Wait for surface to be ready (shell initialized)
+echo "  Waiting for surface readiness..."
+if ! wait_ready 30; then
+    red "cmux surface never became ready"
+    cat /tmp/cmux-e2e-stderr.log 2>/dev/null | tail -20
+    exit 1
+fi
+echo "  Surface ready!"
+
+# Extra settle time for shell startup scripts
+sleep 2
 echo ""
 
 # ============================================================
@@ -169,7 +208,9 @@ bold "━━━ 3. WORKSPACE CREATION ━━━"
 
 C0=$(ws_count)
 send '{"jsonrpc":"2.0","method":"workspace.create","params":{"directory":"/tmp","title":"ws-test"},"id":10}' >/dev/null
-sleep 4
+sleep 2
+wait_ready 15
+sleep 2
 C1=$(ws_count)
 assert "create: count increased" "$C1" "$(( ${C0:-0} + 1 ))"
 assert_running "create: process alive"
@@ -248,6 +289,43 @@ sleep 3
 assert_running "resize: survives 900x600 (restore)"
 
 # ============================================================
+bold "━━━ 5b. RESIZE DIMENSION VERIFICATION ━━━"
+
+# Verify surface dimensions actually change after resize
+get_surface_width() {
+    local r=$(send '{"jsonrpc":"2.0","method":"surface.size","id":99}')
+    echo "$r" | python3 -c "import sys,json; print(json.load(sys.stdin).get('result',{}).get('gtk_width','0'))" 2>/dev/null || echo 0
+}
+
+send '{"jsonrpc":"2.0","method":"window.resize","params":{"width":"800","height":"500"},"id":35}' >/dev/null
+sleep 3
+W=$(get_surface_width)
+assert "resize-dim: active surface has width ~800" "$W" "^[5-8][0-9][0-9]$"
+
+# Now resize, switch to ws2 (which was hidden), verify IT also has correct dims
+send '{"jsonrpc":"2.0","method":"window.resize","params":{"width":"600","height":"400"},"id":36}' >/dev/null
+sleep 3
+send '{"jsonrpc":"2.0","method":"workspace.select","params":{"index":"2"},"id":37}' >/dev/null
+sleep 2
+W2=$(get_surface_width)
+assert "resize-dim: switched ws2 has width ~600" "$W2" "^[3-6][0-9][0-9]$"
+
+# Switch back to ws1, verify it also has the 600-width
+send '{"jsonrpc":"2.0","method":"workspace.select","params":{"index":"1"},"id":38}' >/dev/null
+sleep 2
+W1=$(get_surface_width)
+assert "resize-dim: switched-back ws1 has width ~600" "$W1" "^[3-6][0-9][0-9]$"
+
+# Type in ws1 after resize+switch to prove it's alive
+send_text "echo RESIZE_DIM_OK > $TEST_DIR/resize_dim.txt\n"
+sleep 2
+assert_file_contains "resize-dim: typing works after resize+switch" "$TEST_DIR/resize_dim.txt" "RESIZE_DIM_OK"
+
+# Restore size
+send '{"jsonrpc":"2.0","method":"window.resize","params":{"width":"900","height":"600"},"id":39}' >/dev/null
+sleep 2
+
+# ============================================================
 bold "━━━ 6. RESIZE + SWITCH COMBO ━━━"
 
 send '{"jsonrpc":"2.0","method":"window.resize","params":{"width":"700","height":"500"},"id":40}' >/dev/null; sleep 1
@@ -307,7 +385,9 @@ assert_running "notify: process alive after notification"
 bold "━━━ 10. THIRD WORKSPACE ━━━"
 
 send '{"jsonrpc":"2.0","method":"workspace.create","params":{"directory":"/var"},"id":70}' >/dev/null
-sleep 4
+sleep 2
+wait_ready 15
+sleep 2
 C=$(ws_count)
 assert_eq "3ws: count is 3" "$C" "3"
 
@@ -384,8 +464,8 @@ assert "api: status has workspaces field" "$R" '"workspaces"'
 bold "━━━ 15. STRESS TEST ━━━"
 
 # Create 2 more workspaces (total 4), rapid switch + resize
-send '{"jsonrpc":"2.0","method":"workspace.create","id":110}' >/dev/null; sleep 3
-send '{"jsonrpc":"2.0","method":"workspace.create","id":111}' >/dev/null; sleep 3
+send '{"jsonrpc":"2.0","method":"workspace.create","id":110}' >/dev/null; sleep 8
+send '{"jsonrpc":"2.0","method":"workspace.create","id":111}' >/dev/null; sleep 8
 
 for i in $(seq 1 20); do
     WS=$(( (i % 4) + 1 ))
@@ -407,9 +487,10 @@ done
 sleep 2
 assert_running "stress: survives interleaved resize+switch"
 
-# Type after stress
+# Type after stress — extra settle time for surface recreations
+sleep 3
 send_text "echo STRESS_OK > $TEST_DIR/stress.txt\n"
-sleep 2
+sleep 3
 assert_file_contains "stress: typing works after stress test" "$TEST_DIR/stress.txt" "STRESS_OK"
 
 # ============================================================

@@ -256,3 +256,18 @@ char* cmux_ghostty_copy_selection(ghostty_surface_t surface) {
     g_free_text(surface, &text);
     return result;
 }
+
+// Check GL error state (for debugging)
+int cmux_check_gl_error(void) {
+    // Try to call glGetError if GLAD is loaded
+    typedef unsigned int GLenum;
+    typedef GLenum (*glGetError_fn)(void);
+    static glGetError_fn fn = NULL;
+    if (!fn) {
+        fn = (glGetError_fn)dlsym(NULL, "glGetError");
+    }
+    if (fn) {
+        return (int)fn();
+    }
+    return -1;
+}

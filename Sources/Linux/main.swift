@@ -60,14 +60,15 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
     workspaceManager.contentBoxWidget = contentBox
 
     if let gApp = ghosttyApp {
-        // GtkNotebook with hidden tabs — one page per workspace
-        guard let wsNotebook = gtk_notebook_new() else { return }
-        gtk_widget_set_hexpand(wsNotebook, 1)
-        gtk_widget_set_vexpand(wsNotebook, 1)
-        gtk_notebook_set_show_tabs(OpaquePointer(wsNotebook), 0)    // Hide tabs
-        gtk_notebook_set_show_border(OpaquePointer(wsNotebook), 0)  // Hide border
-        workspaceManager.notebook = OpaquePointer(wsNotebook)
-        let wsContainer = wsNotebook  // For the gtk_box_append below
+        // GtkStack — only the visible child gets size-allocated.
+        // This prevents GTK from resizing hidden GtkGLAreas and
+        // corrupting their ghostty GL state on window resize.
+        guard let wsStack = gtk_stack_new() else { return }
+        gtk_widget_set_hexpand(wsStack, 1)
+        gtk_widget_set_vexpand(wsStack, 1)
+        gtk_stack_set_transition_type(OpaquePointer(wsStack), GTK_STACK_TRANSITION_TYPE_NONE)
+        workspaceManager.stack = OpaquePointer(wsStack)
+        let wsContainer = wsStack
 
         // Create initial workspace (adds its own GtkGLArea to the stack)
         cmuxLog("[cmux] Creating initial workspace...")
@@ -99,35 +100,10 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
         g_timeout_add(16, { _ -> gboolean in
             ghosttyApp?.tick()
 
-            // Check for pending resize (settled for 300ms)
-            if pendingResizeW > 0 && pendingResizeH > 0 {
-                let now = DispatchTime.now().uptimeNanoseconds
-                if now - lastResizeTime > 300_000_000 {
-                    let w = pendingResizeW
-                    let h = pendingResizeH
-                    pendingResizeW = 0
-                    pendingResizeH = 0
-                    cmuxLog("[resize] Settled at \(w)x\(h)")
-                    // Only update the ACTIVE workspace — don't destroy hidden ones
-                    if let gApp = getGhosttyApp(),
-                       let activeWs = workspaceManager.activeWorkspace,
-                       let glArea = activeWs.glArea,
-                       let surface = activeWs.surface {
-                        gtk_gl_area_make_current(glArea)
-                        gApp.fn_surface_set_size?(surface, UInt32(w), UInt32(h))
-                        let widget = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
-                        let scale = Double(gtk_widget_get_scale_factor(widget))
-                        gApp.fn_surface_set_content_scale?(surface, scale, scale)
-                        gApp.fn_surface_refresh?(surface)
-                        gApp.fn_surface_set_focus?(surface, true)
-                        // Store the new size for hidden workspaces to apply on switch
-                        workspaceManager.lastResizeW = w
-                        workspaceManager.lastResizeH = h
-                    }
-                }
-            }
+            // Resize is now handled immediately in the GtkGLArea resize callback.
+            // No debounce needed — ghostty handles rapid set_size calls.
 
-            // Queue render on active workspace (don't call set_focus every tick — causes flicker)
+            // Queue render on active workspace
             if let ws = workspaceManager.activeWorkspace, let glArea = ws.glArea {
                 gtk_gl_area_queue_render(glArea)
             }

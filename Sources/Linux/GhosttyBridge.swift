@@ -107,6 +107,8 @@ final class GhosttyApp {
     var fn_surface_set_focus: (@convention(c) (UnsafeMutableRawPointer?, Bool) -> Void)?
     var fn_surface_set_content_scale: (@convention(c) (UnsafeMutableRawPointer?, Double, Double) -> Void)?
     var fn_surface_refresh: (@convention(c) (UnsafeMutableRawPointer?) -> Void)?
+    var fn_surface_set_occlusion: (@convention(c) (UnsafeMutableRawPointer?, Bool) -> Void)?
+    var fn_surface_reinit_renderer: (@convention(c) (UnsafeMutableRawPointer?) -> Bool)?
     private var fn_surface_key: (@convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Bool)?
     private var fn_surface_text: (@convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UInt) -> Void)?
     private var fn_surface_mouse_button: (@convention(c) (UnsafeMutableRawPointer?, Int32, Int32, Int32) -> Bool)?
@@ -165,7 +167,9 @@ final class GhosttyApp {
               let surface_mouse_button: @convention(c) (UnsafeMutableRawPointer?, Int32, Int32, Int32) -> Bool = sym("ghostty_surface_mouse_button"),
               let surface_mouse_pos: @convention(c) (UnsafeMutableRawPointer?, Double, Double, Int32) -> Void = sym("ghostty_surface_mouse_pos"),
               let surface_mouse_scroll: @convention(c) (UnsafeMutableRawPointer?, Double, Double, Int32) -> Void = sym("ghostty_surface_mouse_scroll"),
-              let surface_binding_action: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UInt) -> Bool = sym("ghostty_surface_binding_action")
+              let surface_binding_action: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UInt) -> Bool = sym("ghostty_surface_binding_action"),
+              let surface_set_occlusion: @convention(c) (UnsafeMutableRawPointer?, Bool) -> Void = sym("ghostty_surface_set_occlusion"),
+              let surface_reinit_renderer: @convention(c) (UnsafeMutableRawPointer?) -> Bool = sym("ghostty_surface_reinit_renderer")
         else {
             cmuxLog("[GhosttyBridge] Symbol resolution failed")
             dlclose(h); handle = nil; return nil
@@ -187,6 +191,8 @@ final class GhosttyApp {
         self.fn_surface_mouse_pos = surface_mouse_pos
         self.fn_surface_mouse_scroll = surface_mouse_scroll
         self.fn_surface_binding_action = surface_binding_action
+        self.fn_surface_set_occlusion = surface_set_occlusion
+        self.fn_surface_reinit_renderer = surface_reinit_renderer
 
         // Resolve C helper functions (for correct ABI calling convention)
         cmux_ghostty_resolve_key_fns(h)
@@ -395,7 +401,11 @@ final class GhosttyApp {
     /// Send raw text input to the surface (for IME).
     func sendText(_ text: String) {
         let surface = workspaceManager.activeSurface ?? self.surface
-        guard let surface = surface else { return }
+        guard let surface = surface else {
+            cmuxLog("[sendText] No active surface — text dropped: \(text.prefix(40))")
+            return
+        }
+        cmuxLog("[sendText] Sending \(text.count) bytes to surface \(surface)")
         text.withCString { cStr in
             cmux_ghostty_surface_text(surface, cStr, text.utf8.count)
         }

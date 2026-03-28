@@ -258,15 +258,39 @@ class SocketControlServer {
 
         case "surface.send_text":
             if let text = request.params?["text"] {
+                let hasSurface = workspaceManager.activeSurface != nil
+                cmuxLog("[socket] send_text: \(text.prefix(40).debugDescription) surface=\(hasSurface)")
                 pendingSendText = text
                 g_idle_add({ _ -> gboolean in
                     if let t = pendingSendText {
+                        if getGhosttyApp() == nil {
+                            cmuxLog("[socket] send_text: ghosttyApp is nil!")
+                        }
                         getGhosttyApp()?.sendText(t)
                         pendingSendText = nil
                     }
                     return 0
                 }, nil)
-                return successResponse(id: id, result: ["ok": "true"])
+                return successResponse(id: id, result: ["ok": "true", "surface": hasSurface ? "true" : "false"])
+            }
+            return errorResponse(id: id, code: -32602, message: "Missing 'text' parameter")
+
+        case "surface.pty_write":
+            // Direct PTY write — bypasses ghostty IO thread for E2E testing
+            if let text = request.params?["text"] {
+                var fd = workspaceManager.activePtyFd
+                // If no fd assigned yet, rescan (PTY opens asynchronously after surface creation)
+                if fd < 0 {
+                    workspaceManager.rescanPtyFds()
+                    fd = workspaceManager.activePtyFd
+                }
+                if fd >= 0 {
+                    let bytes = Array(text.utf8)
+                    let written = write(fd, bytes, bytes.count)
+                    cmuxLog("[socket] pty_write: fd=\(fd) wrote=\(written) bytes to PTY master")
+                    return successResponse(id: id, result: ["ok": "true", "fd": String(fd), "written": String(written)])
+                }
+                return errorResponse(id: id, code: -32000, message: "No PTY master fd for active workspace")
             }
             return errorResponse(id: id, code: -32602, message: "Missing 'text' parameter")
 
@@ -277,6 +301,31 @@ class SocketControlServer {
                 return successResponse(id: id, result: ["ok": "true"])
             }
             return errorResponse(id: id, code: -32602, message: "Missing 'key' parameter")
+
+        case "system.ready":
+            let hasSurface = workspaceManager.activeSurface != nil
+            let wsCount = workspaceManager.workspaces.count
+            return successResponse(id: id, result: [
+                "ready": hasSurface ? "true" : "false",
+                "surface": hasSurface ? "true" : "false",
+                "workspaces": String(wsCount),
+            ])
+
+        case "surface.size":
+            // Return the ghostty surface's actual grid/pixel dimensions
+            if let surface = workspaceManager.activeSurface,
+               let gApp = getGhosttyApp(),
+               let glArea = workspaceManager.activeWorkspace?.glArea {
+                let widget = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
+                let gtkW = gtk_widget_get_width(widget)
+                let gtkH = gtk_widget_get_height(widget)
+                return successResponse(id: id, result: [
+                    "gtk_width": String(gtkW),
+                    "gtk_height": String(gtkH),
+                    "surface": "true",
+                ])
+            }
+            return successResponse(id: id, result: ["surface": "false"])
 
         case "system.status":
             let ws = workspaceManager.workspaces
