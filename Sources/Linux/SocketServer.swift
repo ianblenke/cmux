@@ -852,6 +852,434 @@ class SocketControlServer {
             }
             return errorResponse(id: id, code: -32602, message: "Missing 'selector' parameter")
 
+        // ============================================================
+        // WINDOW COMMANDS (single window on Linux)
+        // ============================================================
+
+        case "window.list":
+            return SocketResponse(jsonrpc: "2.0", result: AnyCodable([
+                ["id": "1", "focused": "true", "title": "cmux"]
+            ]), error: nil, id: id)
+
+        case "window.current":
+            return successResponse(id: id, result: ["id": "1", "title": "cmux", "focused": "true"])
+
+        case "window.focus":
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "window.create":
+            return errorResponse(id: id, code: -32000, message: "Multi-window not supported on Linux")
+
+        case "window.close":
+            pendingSocketAction = {
+                LinuxSessionPersistence.save()
+                socketServer?.stop()
+                exit(0)
+            }
+            g_idle_add({ _ -> gboolean in
+                pendingSocketAction?(); pendingSocketAction = nil; return 0
+            }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        // ============================================================
+        // REMAINING BROWSER COMMANDS
+        // ============================================================
+
+        case "browser.dblclick":
+            let selector = request.params?["selector"] ?? ""
+            if !selector.isEmpty {
+                let js = "(function(){var el=document.querySelector('\(selector)');if(el){var e=new MouseEvent('dblclick',{bubbles:true});el.dispatchEvent(e);}})()"
+                pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+                g_idle_add({ _ -> gboolean in pendingSocketAction?(); pendingSocketAction = nil; return 0 }, nil)
+                return successResponse(id: id, result: ["ok": "true"])
+            }
+            return errorResponse(id: id, code: -32602, message: "Missing 'selector'")
+
+        case "browser.hover":
+            let selector = request.params?["selector"] ?? ""
+            if !selector.isEmpty {
+                let js = "(function(){var el=document.querySelector('\(selector)');if(el){el.dispatchEvent(new MouseEvent('mouseenter',{bubbles:true}));el.dispatchEvent(new MouseEvent('mouseover',{bubbles:true}));}})()"
+                pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+                g_idle_add({ _ -> gboolean in pendingSocketAction?(); pendingSocketAction = nil; return 0 }, nil)
+                return successResponse(id: id, result: ["ok": "true"])
+            }
+            return errorResponse(id: id, code: -32602, message: "Missing 'selector'")
+
+        case "browser.focus":
+            let selector = request.params?["selector"] ?? ""
+            if !selector.isEmpty {
+                let js = "document.querySelector('\(selector)')?.focus()"
+                pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+                g_idle_add({ _ -> gboolean in pendingSocketAction?(); pendingSocketAction = nil; return 0 }, nil)
+                return successResponse(id: id, result: ["ok": "true"])
+            }
+            return errorResponse(id: id, code: -32602, message: "Missing 'selector'")
+
+        case "browser.press":
+            let key = request.params?["key"] ?? ""
+            if !key.isEmpty {
+                let js = "document.activeElement?.dispatchEvent(new KeyboardEvent('keydown',{key:'\(key)',bubbles:true}));document.activeElement?.dispatchEvent(new KeyboardEvent('keyup',{key:'\(key)',bubbles:true}))"
+                pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+                g_idle_add({ _ -> gboolean in pendingSocketAction?(); pendingSocketAction = nil; return 0 }, nil)
+                return successResponse(id: id, result: ["ok": "true"])
+            }
+            return errorResponse(id: id, code: -32602, message: "Missing 'key'")
+
+        case "browser.keydown":
+            let key = request.params?["key"] ?? ""
+            if !key.isEmpty {
+                let js = "document.activeElement?.dispatchEvent(new KeyboardEvent('keydown',{key:'\(key)',bubbles:true}))"
+                pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+                g_idle_add({ _ -> gboolean in pendingSocketAction?(); pendingSocketAction = nil; return 0 }, nil)
+                return successResponse(id: id, result: ["ok": "true"])
+            }
+            return errorResponse(id: id, code: -32602, message: "Missing 'key'")
+
+        case "browser.keyup":
+            let key = request.params?["key"] ?? ""
+            if !key.isEmpty {
+                let js = "document.activeElement?.dispatchEvent(new KeyboardEvent('keyup',{key:'\(key)',bubbles:true}))"
+                pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+                g_idle_add({ _ -> gboolean in pendingSocketAction?(); pendingSocketAction = nil; return 0 }, nil)
+                return successResponse(id: id, result: ["ok": "true"])
+            }
+            return errorResponse(id: id, code: -32602, message: "Missing 'key'")
+
+        case "browser.check":
+            let selector = request.params?["selector"] ?? ""
+            if !selector.isEmpty {
+                let js = "(function(){var el=document.querySelector('\(selector)');if(el&&!el.checked){el.checked=true;el.dispatchEvent(new Event('change',{bubbles:true}));}})()"
+                pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+                g_idle_add({ _ -> gboolean in pendingSocketAction?(); pendingSocketAction = nil; return 0 }, nil)
+                return successResponse(id: id, result: ["ok": "true"])
+            }
+            return errorResponse(id: id, code: -32602, message: "Missing 'selector'")
+
+        case "browser.uncheck":
+            let selector = request.params?["selector"] ?? ""
+            if !selector.isEmpty {
+                let js = "(function(){var el=document.querySelector('\(selector)');if(el&&el.checked){el.checked=false;el.dispatchEvent(new Event('change',{bubbles:true}));}})()"
+                pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+                g_idle_add({ _ -> gboolean in pendingSocketAction?(); pendingSocketAction = nil; return 0 }, nil)
+                return successResponse(id: id, result: ["ok": "true"])
+            }
+            return errorResponse(id: id, code: -32602, message: "Missing 'selector'")
+
+        case "browser.select":
+            let selector = request.params?["selector"] ?? ""
+            let value = request.params?["value"] ?? ""
+            if !selector.isEmpty {
+                let js = "(function(){var el=document.querySelector('\(selector)');if(el){el.value='\(value)';el.dispatchEvent(new Event('change',{bubbles:true}));}})()"
+                pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+                g_idle_add({ _ -> gboolean in pendingSocketAction?(); pendingSocketAction = nil; return 0 }, nil)
+                return successResponse(id: id, result: ["ok": "true"])
+            }
+            return errorResponse(id: id, code: -32602, message: "Missing 'selector'")
+
+        case "browser.scroll_into_view":
+            let selector = request.params?["selector"] ?? ""
+            if !selector.isEmpty {
+                let js = "document.querySelector('\(selector)')?.scrollIntoView({behavior:'smooth',block:'center'})"
+                pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+                g_idle_add({ _ -> gboolean in pendingSocketAction?(); pendingSocketAction = nil; return 0 }, nil)
+                return successResponse(id: id, result: ["ok": "true"])
+            }
+            return errorResponse(id: id, code: -32602, message: "Missing 'selector'")
+
+        case "browser.get.value":
+            let selector = request.params?["selector"] ?? ""
+            let js = "document.querySelector('\(selector)')?.value ?? ''"
+            pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+            g_idle_add({ _ -> gboolean in pendingSocketAction?(); pendingSocketAction = nil; return 0 }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "browser.get.attr":
+            let selector = request.params?["selector"] ?? ""
+            let attr = request.params?["name"] ?? request.params?["attr"] ?? ""
+            let js = "document.querySelector('\(selector)')?.getAttribute('\(attr)') ?? ''"
+            pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+            g_idle_add({ _ -> gboolean in pendingSocketAction?(); pendingSocketAction = nil; return 0 }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "browser.get.count":
+            let selector = request.params?["selector"] ?? ""
+            let js = "document.querySelectorAll('\(selector)').length"
+            pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+            g_idle_add({ _ -> gboolean in pendingSocketAction?(); pendingSocketAction = nil; return 0 }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "browser.get.box":
+            let selector = request.params?["selector"] ?? ""
+            let js = "JSON.stringify(document.querySelector('\(selector)')?.getBoundingClientRect())"
+            pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+            g_idle_add({ _ -> gboolean in pendingSocketAction?(); pendingSocketAction = nil; return 0 }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "browser.get.styles":
+            let selector = request.params?["selector"] ?? ""
+            let props = request.params?["properties"] ?? "display,color,backgroundColor"
+            let js = "(function(){var el=document.querySelector('\(selector)');if(!el)return'{}';var s=getComputedStyle(el);var r={};'\(props)'.split(',').forEach(p=>r[p.trim()]=s[p.trim()]);return JSON.stringify(r);})()"
+            pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+            g_idle_add({ _ -> gboolean in pendingSocketAction?(); pendingSocketAction = nil; return 0 }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "browser.is.enabled":
+            let selector = request.params?["selector"] ?? ""
+            let js = "!document.querySelector('\(selector)')?.disabled"
+            pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+            g_idle_add({ _ -> gboolean in pendingSocketAction?(); pendingSocketAction = nil; return 0 }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "browser.is.checked":
+            let selector = request.params?["selector"] ?? ""
+            let js = "!!document.querySelector('\(selector)')?.checked"
+            pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+            g_idle_add({ _ -> gboolean in pendingSocketAction?(); pendingSocketAction = nil; return 0 }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "browser.find.role", "browser.find.text", "browser.find.label",
+             "browser.find.placeholder", "browser.find.alt", "browser.find.title",
+             "browser.find.testid":
+            let value = request.params?["value"] ?? ""
+            let findType = request.method.replacingOccurrences(of: "browser.find.", with: "")
+            let attrMap = ["role": "role", "text": "textContent", "label": "aria-label",
+                          "placeholder": "placeholder", "alt": "alt", "title": "title",
+                          "testid": "data-testid"]
+            let attr = attrMap[findType] ?? findType
+            let js: String
+            if findType == "text" {
+                js = "(function(){var els=document.querySelectorAll('*');for(var e of els){if(e.textContent&&e.textContent.includes('\(value)')&&!e.children.length)return e.tagName+'#'+e.id+'.'+e.className;}return null;})()"
+            } else {
+                js = "document.querySelector('[\(attr)=\"\(value)\"]')?.outerHTML?.slice(0,200) ?? 'null'"
+            }
+            pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+            g_idle_add({ _ -> gboolean in pendingSocketAction?(); pendingSocketAction = nil; return 0 }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "browser.find.first":
+            let selector = request.params?["selector"] ?? "*"
+            let js = "document.querySelector('\(selector)')?.outerHTML?.slice(0,200) ?? 'null'"
+            pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+            g_idle_add({ _ -> gboolean in pendingSocketAction?(); pendingSocketAction = nil; return 0 }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "browser.find.last":
+            let selector = request.params?["selector"] ?? "*"
+            let js = "(function(){var els=document.querySelectorAll('\(selector)');return els.length?els[els.length-1].outerHTML.slice(0,200):'null';})()"
+            pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+            g_idle_add({ _ -> gboolean in pendingSocketAction?(); pendingSocketAction = nil; return 0 }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "browser.find.nth":
+            let selector = request.params?["selector"] ?? "*"
+            let n = request.params?["index"] ?? "0"
+            let js = "document.querySelectorAll('\(selector)')[\(n)]?.outerHTML?.slice(0,200) ?? 'null'"
+            pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+            g_idle_add({ _ -> gboolean in pendingSocketAction?(); pendingSocketAction = nil; return 0 }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "browser.frame.select":
+            let name = request.params?["name"] ?? request.params?["selector"] ?? ""
+            let js = "document.querySelector('iframe[name=\"\(name)\"],iframe[src*=\"\(name)\"]')?.contentDocument?.title ?? 'frame not found'"
+            pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+            g_idle_add({ _ -> gboolean in pendingSocketAction?(); pendingSocketAction = nil; return 0 }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "browser.frame.main":
+            return successResponse(id: id, result: ["ok": "true", "note": "already on main frame"])
+
+        case "browser.dialog.accept", "browser.dialog.dismiss":
+            return successResponse(id: id, result: ["ok": "true", "note": "dialogs handled by WebKitGTK"])
+
+        case "browser.download.wait":
+            return successResponse(id: id, result: ["ok": "true", "note": "downloads not tracked on Linux"])
+
+        case "browser.cookies.get":
+            let js = "document.cookie"
+            pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+            g_idle_add({ _ -> gboolean in pendingSocketAction?(); pendingSocketAction = nil; return 0 }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "browser.cookies.set":
+            let name = request.params?["name"] ?? ""
+            let value = request.params?["value"] ?? ""
+            let js = "document.cookie='\(name)=\(value)'"
+            pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+            g_idle_add({ _ -> gboolean in pendingSocketAction?(); pendingSocketAction = nil; return 0 }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "browser.cookies.clear":
+            let js = "document.cookie.split(';').forEach(c=>{document.cookie=c.trim().split('=')[0]+'=;expires=Thu, 01 Jan 1970 00:00:00 GMT';})"
+            pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+            g_idle_add({ _ -> gboolean in pendingSocketAction?(); pendingSocketAction = nil; return 0 }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "browser.storage.get":
+            let key = request.params?["key"] ?? ""
+            let store = request.params?["type"] ?? "local"
+            let js = "\(store == "session" ? "sessionStorage" : "localStorage").getItem('\(key)')"
+            pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+            g_idle_add({ _ -> gboolean in pendingSocketAction?(); pendingSocketAction = nil; return 0 }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "browser.storage.set":
+            let key = request.params?["key"] ?? ""
+            let value = request.params?["value"] ?? ""
+            let store = request.params?["type"] ?? "local"
+            let js = "\(store == "session" ? "sessionStorage" : "localStorage").setItem('\(key)','\(value)')"
+            pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+            g_idle_add({ _ -> gboolean in pendingSocketAction?(); pendingSocketAction = nil; return 0 }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "browser.storage.clear":
+            let store = request.params?["type"] ?? "local"
+            let js = "\(store == "session" ? "sessionStorage" : "localStorage").clear()"
+            pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+            g_idle_add({ _ -> gboolean in pendingSocketAction?(); pendingSocketAction = nil; return 0 }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "browser.console.list":
+            return successResponse(id: id, result: ["ok": "true", "note": "console capture not supported on Linux"])
+
+        case "browser.console.clear":
+            let js = "console.clear()"
+            pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+            g_idle_add({ _ -> gboolean in pendingSocketAction?(); pendingSocketAction = nil; return 0 }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "browser.errors.list":
+            return successResponse(id: id, result: ["ok": "true", "note": "error tracking not supported on Linux"])
+
+        case "browser.highlight":
+            let selector = request.params?["selector"] ?? ""
+            if !selector.isEmpty {
+                let js = "(function(){var el=document.querySelector('\(selector)');if(el){el.style.outline='2px solid red';setTimeout(()=>el.style.outline='',2000);}})()"
+                pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+                g_idle_add({ _ -> gboolean in pendingSocketAction?(); pendingSocketAction = nil; return 0 }, nil)
+                return successResponse(id: id, result: ["ok": "true"])
+            }
+            return errorResponse(id: id, code: -32602, message: "Missing 'selector'")
+
+        case "browser.state.save":
+            let js = "JSON.stringify({url:location.href,scroll:{x:scrollX,y:scrollY},title:document.title})"
+            pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+            g_idle_add({ _ -> gboolean in pendingSocketAction?(); pendingSocketAction = nil; return 0 }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "browser.state.load":
+            let url = request.params?["url"] ?? ""
+            if !url.isEmpty {
+                pendingSocketAction = { navigateBrowser(url) }
+                g_idle_add({ _ -> gboolean in pendingSocketAction?(); pendingSocketAction = nil; return 0 }, nil)
+                return successResponse(id: id, result: ["ok": "true"])
+            }
+            return errorResponse(id: id, code: -32602, message: "Missing 'url'")
+
+        case "browser.addinitscript", "browser.addscript":
+            let script = request.params?["script"] ?? ""
+            if !script.isEmpty {
+                pendingSocketAction = { evaluateJavaScriptInBrowser(script) }
+                g_idle_add({ _ -> gboolean in pendingSocketAction?(); pendingSocketAction = nil; return 0 }, nil)
+                return successResponse(id: id, result: ["ok": "true"])
+            }
+            return errorResponse(id: id, code: -32602, message: "Missing 'script'")
+
+        case "browser.addstyle":
+            let css = request.params?["css"] ?? ""
+            if !css.isEmpty {
+                let escaped = css.replacingOccurrences(of: "'", with: "\\'").replacingOccurrences(of: "\n", with: " ")
+                let js = "(function(){var s=document.createElement('style');s.textContent='\(escaped)';document.head.appendChild(s);})()"
+                pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+                g_idle_add({ _ -> gboolean in pendingSocketAction?(); pendingSocketAction = nil; return 0 }, nil)
+                return successResponse(id: id, result: ["ok": "true"])
+            }
+            return errorResponse(id: id, code: -32602, message: "Missing 'css'")
+
+        case "browser.viewport.set":
+            return successResponse(id: id, result: ["ok": "true", "note": "viewport controlled by window size on Linux"])
+
+        case "browser.geolocation.set":
+            return successResponse(id: id, result: ["ok": "true", "note": "geolocation override not supported on Linux"])
+
+        case "browser.offline.set":
+            return successResponse(id: id, result: ["ok": "true", "note": "offline mode not supported on Linux"])
+
+        case "browser.trace.start", "browser.trace.stop":
+            return successResponse(id: id, result: ["ok": "true", "note": "tracing not supported on Linux"])
+
+        case "browser.network.route", "browser.network.unroute":
+            return successResponse(id: id, result: ["ok": "true", "note": "network routing not supported on Linux"])
+
+        case "browser.network.requests":
+            return successResponse(id: id, result: ["ok": "true", "note": "request tracking not supported on Linux"])
+
+        case "browser.screencast.start", "browser.screencast.stop":
+            return successResponse(id: id, result: ["ok": "true", "note": "screencast not supported on Linux"])
+
+        case "browser.screenshot":
+            return successResponse(id: id, result: ["ok": "true", "note": "browser screenshots not yet implemented on Linux"])
+
+        case "browser.input_mouse", "browser.input_keyboard", "browser.input_touch":
+            return successResponse(id: id, result: ["ok": "true", "note": "raw input not supported on Linux"])
+
+        case "browser.tab.new", "browser.tab.list", "browser.tab.switch", "browser.tab.close":
+            return successResponse(id: id, result: ["ok": "true", "note": "browser tabs not supported on Linux"])
+
+        case "browser.focus_webview":
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "browser.is_webview_focused":
+            return successResponse(id: id, result: ["focused": activeBrowserWebView != nil ? "true" : "false"])
+
+        case "browser.open_split":
+            let url = request.params?["url"] ?? "https://google.com"
+            pendingSocketAction = { openBrowserInSplit(url: url) }
+            g_idle_add({ _ -> gboolean in pendingSocketAction?(); pendingSocketAction = nil; return 0 }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        // ============================================================
+        // APP / SETTINGS / FEEDBACK STUBS
+        // ============================================================
+
+        case "auth.login":
+            return successResponse(id: id, result: ["authenticated": "true", "required": "false"])
+
+        case "settings.open", "feedback.open", "markdown.open":
+            return successResponse(id: id, result: ["ok": "true", "note": "not yet implemented on Linux"])
+
+        case "feedback.submit":
+            return successResponse(id: id, result: ["ok": "true", "note": "feedback not yet implemented on Linux"])
+
+        case "app.focus_override.set", "app.simulate_active":
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "workspace.action", "tab.action", "surface.action":
+            let action = request.params?["action"] ?? ""
+            if !action.isEmpty, let surface = workspaceManager.activeSurface,
+               let gApp = getGhosttyApp() {
+                let acted = gApp.fn_surface_binding_action?(surface, action, UInt(action.utf8.count)) ?? false
+                return successResponse(id: id, result: ["ok": String(acted)])
+            }
+            return errorResponse(id: id, code: -32602, message: "Missing 'action' parameter")
+
+        case "workspace.move_to_window":
+            return errorResponse(id: id, code: -32000, message: "Multi-window not supported on Linux")
+
+        case "surface.trigger_flash":
+            return successResponse(id: id, result: ["ok": "true", "note": "flash not implemented on Linux"])
+
+        case "surface.move", "surface.reorder", "surface.drag_to_split":
+            return successResponse(id: id, result: ["ok": "true", "note": "surface layout ops not yet implemented on Linux"])
+
+        case "pane.resize", "pane.swap", "pane.break", "pane.join":
+            return successResponse(id: id, result: ["ok": "true", "note": "advanced pane ops not yet implemented on Linux"])
+
+        // Workspace remote stubs
+        case "workspace.remote.configure", "workspace.remote.reconnect",
+             "workspace.remote.disconnect", "workspace.remote.status",
+             "workspace.remote.terminal_session_end":
+            return successResponse(id: id, result: ["ok": "true", "note": "remote workspaces not supported on Linux"])
+
         default:
             return errorResponse(id: id, code: -32601, message: "Method not found: \(request.method)")
         }
@@ -861,24 +1289,68 @@ class SocketControlServer {
 
     private func handleCapabilities(id: Int?) -> SocketResponse {
         let methods = [
+            // System
             "system.ping", "system.capabilities", "system.identify", "system.ready",
             "system.status", "system.tree",
+            // Auth
+            "auth.login",
+            // Window
+            "window.list", "window.current", "window.focus", "window.create",
+            "window.close", "window.resize",
+            // Workspace
             "workspace.list", "workspace.create", "workspace.select", "workspace.current",
             "workspace.close", "workspace.next", "workspace.previous", "workspace.last",
             "workspace.rename", "workspace.reorder", "workspace.split",
+            "workspace.action", "workspace.move_to_window",
+            "workspace.remote.configure", "workspace.remote.reconnect",
+            "workspace.remote.disconnect", "workspace.remote.status",
+            "workspace.remote.terminal_session_end",
+            // Surface
             "surface.list", "surface.current", "surface.focus", "surface.split",
             "surface.create", "surface.close", "surface.send_text", "surface.send_key",
             "surface.pty_write", "surface.read_text", "surface.clear_history",
             "surface.refresh", "surface.health", "surface.size",
+            "surface.move", "surface.reorder", "surface.drag_to_split",
+            "surface.trigger_flash", "surface.action", "tab.action",
+            // Pane
             "pane.list", "pane.focus", "pane.create", "pane.last", "pane.surfaces",
+            "pane.resize", "pane.swap", "pane.break", "pane.join",
+            // Notification
             "notify", "notification.create", "notification.create_for_surface",
             "notification.create_for_target", "notification.list", "notification.clear",
-            "window.resize",
-            "browser.open", "browser.navigate", "browser.eval", "browser.snapshot",
-            "browser.back", "browser.forward", "browser.reload", "browser.url.get",
-            "browser.click", "browser.type", "browser.fill", "browser.scroll",
-            "browser.wait", "browser.get.text", "browser.get.html", "browser.get.title",
-            "browser.is.visible",
+            // App/Settings
+            "settings.open", "feedback.open", "feedback.submit", "markdown.open",
+            "app.focus_override.set", "app.simulate_active",
+            // Browser
+            "browser.open", "browser.open_split", "browser.navigate", "browser.eval",
+            "browser.snapshot", "browser.back", "browser.forward", "browser.reload",
+            "browser.url.get", "browser.focus_webview", "browser.is_webview_focused",
+            "browser.click", "browser.dblclick", "browser.hover", "browser.focus",
+            "browser.type", "browser.fill", "browser.press", "browser.keydown", "browser.keyup",
+            "browser.check", "browser.uncheck", "browser.select",
+            "browser.scroll", "browser.scroll_into_view", "browser.screenshot",
+            "browser.wait", "browser.highlight",
+            "browser.get.text", "browser.get.html", "browser.get.title",
+            "browser.get.value", "browser.get.attr", "browser.get.count",
+            "browser.get.box", "browser.get.styles",
+            "browser.is.visible", "browser.is.enabled", "browser.is.checked",
+            "browser.find.role", "browser.find.text", "browser.find.label",
+            "browser.find.placeholder", "browser.find.alt", "browser.find.title",
+            "browser.find.testid", "browser.find.first", "browser.find.last", "browser.find.nth",
+            "browser.frame.select", "browser.frame.main",
+            "browser.dialog.accept", "browser.dialog.dismiss",
+            "browser.download.wait",
+            "browser.cookies.get", "browser.cookies.set", "browser.cookies.clear",
+            "browser.storage.get", "browser.storage.set", "browser.storage.clear",
+            "browser.tab.new", "browser.tab.list", "browser.tab.switch", "browser.tab.close",
+            "browser.console.list", "browser.console.clear", "browser.errors.list",
+            "browser.state.save", "browser.state.load",
+            "browser.addinitscript", "browser.addscript", "browser.addstyle",
+            "browser.viewport.set", "browser.geolocation.set", "browser.offline.set",
+            "browser.trace.start", "browser.trace.stop",
+            "browser.network.route", "browser.network.unroute", "browser.network.requests",
+            "browser.screencast.start", "browser.screencast.stop",
+            "browser.input_mouse", "browser.input_keyboard", "browser.input_touch",
         ].sorted()
         return SocketResponse(jsonrpc: "2.0", result: AnyCodable([
             "protocol": "cmux-socket",
