@@ -114,7 +114,7 @@ final class GhosttyApp {
     private var fn_surface_mouse_button: (@convention(c) (UnsafeMutableRawPointer?, Int32, Int32, Int32) -> Bool)?
     private var fn_surface_mouse_pos: (@convention(c) (UnsafeMutableRawPointer?, Double, Double, Int32) -> Void)?
     private var fn_surface_mouse_scroll: (@convention(c) (UnsafeMutableRawPointer?, Double, Double, Int32) -> Void)?
-    private var fn_surface_binding_action: (@convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UInt) -> Bool)?
+    var fn_surface_binding_action: (@convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UInt) -> Bool)?
     private var fn_config_free: (@convention(c) (UnsafeMutableRawPointer?) -> Void)?
 
     init?() {
@@ -197,6 +197,7 @@ final class GhosttyApp {
         // Resolve C helper functions (for correct ABI calling convention)
         cmux_ghostty_resolve_key_fns(h)
         cmux_ghostty_resolve_selection_fns(h)
+        cmux_ghostty_resolve_read_text_fn(h)
 
         // Set up action callbacks for title/pwd/render
         // Notification callbacks

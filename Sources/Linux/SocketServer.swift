@@ -4,6 +4,7 @@
 
 import Foundation
 import CGtk4
+import CGhosttyHelpers
 #if canImport(Glibc)
 import Glibc
 #endif
@@ -425,9 +426,514 @@ class SocketControlServer {
             workspaceManager.notifyActive(title: title, body: body)
             return successResponse(id: id, result: ["ok": "true"])
 
+        // ============================================================
+        // WORKSPACE NAVIGATION
+        // ============================================================
+
+        case "workspace.current":
+            if let ws = workspaceManager.activeWorkspace {
+                return successResponse(id: id, result: [
+                    "id": String(ws.id),
+                    "index": String(workspaceManager.activeIndex + 1),
+                    "title": ws.title,
+                    "cwd": ws.cwd,
+                    "git_branch": ws.gitBranch ?? "",
+                ])
+            }
+            return errorResponse(id: id, code: -32000, message: "No active workspace")
+
+        case "workspace.next":
+            let count = workspaceManager.workspaces.count
+            if count > 1 {
+                let next = (workspaceManager.activeIndex + 1) % count
+                pendingSelectIndex = next
+                g_idle_add({ _ -> gboolean in
+                    workspaceManager.switchTo(index: pendingSelectIndex); return 0
+                }, nil)
+                return successResponse(id: id, result: ["ok": "true", "index": String(next + 1)])
+            }
+            return successResponse(id: id, result: ["ok": "true", "index": "1"])
+
+        case "workspace.previous":
+            let count = workspaceManager.workspaces.count
+            if count > 1 {
+                let prev = (workspaceManager.activeIndex - 1 + count) % count
+                pendingSelectIndex = prev
+                g_idle_add({ _ -> gboolean in
+                    workspaceManager.switchTo(index: pendingSelectIndex); return 0
+                }, nil)
+                return successResponse(id: id, result: ["ok": "true", "index": String(prev + 1)])
+            }
+            return successResponse(id: id, result: ["ok": "true", "index": "1"])
+
+        case "workspace.last":
+            let count = workspaceManager.workspaces.count
+            if count > 0 {
+                pendingSelectIndex = count - 1
+                g_idle_add({ _ -> gboolean in
+                    workspaceManager.switchTo(index: pendingSelectIndex); return 0
+                }, nil)
+                return successResponse(id: id, result: ["ok": "true", "index": String(count)])
+            }
+            return errorResponse(id: id, code: -32000, message: "No workspaces")
+
+        case "workspace.rename":
+            if let title = request.params?["title"] {
+                let idx = workspaceManager.activeIndex
+                if idx >= 0 && idx < workspaceManager.workspaces.count {
+                    workspaceManager.workspaces[idx].title = title
+                    g_idle_add({ _ -> gboolean in
+                        workspaceManager.updateSidebar()
+                        workspaceManager.updateWindowTitle()
+                        return 0
+                    }, nil)
+                    return successResponse(id: id, result: ["ok": "true"])
+                }
+            }
+            return errorResponse(id: id, code: -32602, message: "Missing 'title' parameter")
+
+        case "workspace.reorder":
+            if let fromStr = request.params?["from"], let toStr = request.params?["to"],
+               let from = Int(fromStr), let to = Int(toStr) {
+                let fromIdx = from - 1
+                let toIdx = to - 1
+                let count = workspaceManager.workspaces.count
+                if fromIdx >= 0 && fromIdx < count && toIdx >= 0 && toIdx < count {
+                    let ws = workspaceManager.workspaces.remove(at: fromIdx)
+                    workspaceManager.workspaces.insert(ws, at: toIdx)
+                    // Adjust active index
+                    if workspaceManager.activeIndex == fromIdx {
+                        workspaceManager.activeIndex = toIdx
+                    } else if fromIdx < workspaceManager.activeIndex && toIdx >= workspaceManager.activeIndex {
+                        workspaceManager.activeIndex -= 1
+                    } else if fromIdx > workspaceManager.activeIndex && toIdx <= workspaceManager.activeIndex {
+                        workspaceManager.activeIndex += 1
+                    }
+                    g_idle_add({ _ -> gboolean in
+                        workspaceManager.updateSidebar(); return 0
+                    }, nil)
+                    return successResponse(id: id, result: ["ok": "true"])
+                }
+                return errorResponse(id: id, code: -32602, message: "Index out of range")
+            }
+            return errorResponse(id: id, code: -32602, message: "Missing 'from'/'to' parameters")
+
+        // ============================================================
+        // SYSTEM COMMANDS
+        // ============================================================
+
+        case "system.ping":
+            return successResponse(id: id, result: ["pong": "true"])
+
+        case "system.capabilities":
+            return handleCapabilities(id: id)
+
+        case "system.tree":
+            return handleSystemTree(id: id)
+
+        // ============================================================
+        // SURFACE COMMANDS
+        // ============================================================
+
+        case "surface.list":
+            return handleSurfaceList(id: id)
+
+        case "surface.current":
+            if let ws = workspaceManager.activeWorkspace {
+                return successResponse(id: id, result: [
+                    "workspace_id": String(ws.id),
+                    "workspace_index": String(workspaceManager.activeIndex + 1),
+                    "has_surface": ws.surface != nil ? "true" : "false",
+                    "cwd": ws.cwd,
+                    "title": ws.title,
+                ])
+            }
+            return errorResponse(id: id, code: -32000, message: "No active surface")
+
+        case "surface.focus":
+            if let indexStr = request.params?["index"], let index = Int(indexStr) {
+                pendingSelectIndex = index - 1
+                g_idle_add({ _ -> gboolean in
+                    workspaceManager.switchTo(index: pendingSelectIndex); return 0
+                }, nil)
+                return successResponse(id: id, result: ["ok": "true"])
+            }
+            return errorResponse(id: id, code: -32602, message: "Missing 'index' parameter")
+
+        case "surface.split":
+            let direction = request.params?["direction"] ?? "right"
+            let orient: PaneSplit.SplitOrientation = (direction == "down" || direction == "vertical") ? .vertical : .horizontal
+            pendingSocketAction = { workspaceManager.splitActivePane(orientation: orient) }
+            g_idle_add({ _ -> gboolean in
+                pendingSocketAction?(); pendingSocketAction = nil; return 0
+            }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "surface.create":
+            let dir = request.params?["directory"]
+            let title = request.params?["title"]
+            pendingCreateDir = dir
+            pendingCreateTitle = title
+            g_idle_add({ _ -> gboolean in
+                if let gApp = getGhosttyApp() {
+                    _ = workspaceManager.createWorkspace(
+                        ghosttyApp: gApp,
+                        workingDirectory: pendingCreateDir,
+                        title: pendingCreateTitle)
+                }
+                pendingCreateDir = nil
+                pendingCreateTitle = nil
+                return 0
+            }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "surface.close":
+            pendingSocketAction = { workspaceManager.closeActive() }
+            g_idle_add({ _ -> gboolean in
+                pendingSocketAction?(); pendingSocketAction = nil; return 0
+            }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "surface.read_text":
+            return handleReadText(id: id, params: request.params)
+
+        case "surface.clear_history":
+            if let surface = workspaceManager.activeSurface,
+               let gApp = getGhosttyApp() {
+                gApp.fn_surface_binding_action?(surface, "reset", 5)
+                return successResponse(id: id, result: ["ok": "true"])
+            }
+            return errorResponse(id: id, code: -32000, message: "No active surface")
+
+        case "surface.refresh":
+            if let surface = workspaceManager.activeSurface,
+               let gApp = getGhosttyApp() {
+                gApp.fn_surface_refresh?(surface)
+                return successResponse(id: id, result: ["ok": "true"])
+            }
+            return errorResponse(id: id, code: -32000, message: "No active surface")
+
+        case "surface.health":
+            let ws = workspaceManager.activeWorkspace
+            return successResponse(id: id, result: [
+                "has_surface": (ws?.surface != nil) ? "true" : "false",
+                "has_gl_area": (ws?.glArea != nil) ? "true" : "false",
+                "workspace_id": String(ws?.id ?? 0),
+            ])
+
+        // ============================================================
+        // PANE COMMANDS (stubs for split pane support)
+        // ============================================================
+
+        case "pane.list":
+            // Currently each workspace is a single pane
+            let panes = workspaceManager.workspaces.enumerated().map { (i, ws) -> [String: String] in
+                ["id": String(ws.id), "workspace_id": String(ws.id),
+                 "active": i == workspaceManager.activeIndex ? "true" : "false"]
+            }
+            return SocketResponse(jsonrpc: "2.0", result: AnyCodable(panes), error: nil, id: id)
+
+        case "pane.focus":
+            if let idStr = request.params?["id"], let paneId = Int(idStr) {
+                if let idx = workspaceManager.workspaces.firstIndex(where: { $0.id == paneId }) {
+                    pendingSelectIndex = idx
+                    g_idle_add({ _ -> gboolean in
+                        workspaceManager.switchTo(index: pendingSelectIndex); return 0
+                    }, nil)
+                    return successResponse(id: id, result: ["ok": "true"])
+                }
+                return errorResponse(id: id, code: -32000, message: "Pane not found")
+            }
+            return errorResponse(id: id, code: -32602, message: "Missing 'id' parameter")
+
+        case "pane.create":
+            let direction = request.params?["direction"] ?? "right"
+            let orient: PaneSplit.SplitOrientation = (direction == "down" || direction == "vertical") ? .vertical : .horizontal
+            pendingSocketAction = { workspaceManager.splitActivePane(orientation: orient) }
+            g_idle_add({ _ -> gboolean in
+                pendingSocketAction?(); pendingSocketAction = nil; return 0
+            }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "pane.last":
+            let count = workspaceManager.workspaces.count
+            if count > 1 {
+                pendingSelectIndex = count - 1
+                g_idle_add({ _ -> gboolean in
+                    workspaceManager.switchTo(index: pendingSelectIndex); return 0
+                }, nil)
+                return successResponse(id: id, result: ["ok": "true"])
+            }
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "pane.surfaces":
+            if let ws = workspaceManager.activeWorkspace {
+                return SocketResponse(jsonrpc: "2.0", result: AnyCodable([
+                    ["id": String(ws.id), "cwd": ws.cwd, "title": ws.title]
+                ]), error: nil, id: id)
+            }
+            return errorResponse(id: id, code: -32000, message: "No active pane")
+
+        // ============================================================
+        // NOTIFICATION COMMANDS
+        // ============================================================
+
+        case "notification.create", "notification.create_for_surface", "notification.create_for_target":
+            let title = request.params?["title"] ?? ""
+            let body = request.params?["body"] ?? request.params?["message"] ?? ""
+            workspaceManager.notifyActive(title: title, body: body)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "notification.list":
+            let notifications = workspaceManager.workspaces.compactMap { ws -> [String: String]? in
+                guard let note = ws.lastNotification else { return nil }
+                return ["workspace_id": String(ws.id), "message": note]
+            }
+            return SocketResponse(jsonrpc: "2.0", result: AnyCodable(notifications), error: nil, id: id)
+
+        case "notification.clear":
+            for i in 0..<workspaceManager.workspaces.count {
+                workspaceManager.workspaces[i].lastNotification = nil
+                workspaceManager.workspaces[i].hasUnread = false
+            }
+            g_idle_add({ _ -> gboolean in
+                workspaceManager.updateSidebar(); return 0
+            }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        // ============================================================
+        // BROWSER EXTENDED COMMANDS
+        // ============================================================
+
+        case "browser.back":
+            pendingSocketAction = { evaluateJavaScriptInBrowser("history.back()") }
+            g_idle_add({ _ -> gboolean in
+                pendingSocketAction?(); pendingSocketAction = nil; return 0
+            }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "browser.forward":
+            pendingSocketAction = { evaluateJavaScriptInBrowser("history.forward()") }
+            g_idle_add({ _ -> gboolean in
+                pendingSocketAction?(); pendingSocketAction = nil; return 0
+            }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "browser.reload":
+            pendingSocketAction = { evaluateJavaScriptInBrowser("location.reload()") }
+            g_idle_add({ _ -> gboolean in
+                pendingSocketAction?(); pendingSocketAction = nil; return 0
+            }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "browser.url.get":
+            pendingSocketAction = { evaluateJavaScriptInBrowser("location.href") }
+            g_idle_add({ _ -> gboolean in
+                pendingSocketAction?(); pendingSocketAction = nil; return 0
+            }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "browser.get.title":
+            pendingSocketAction = { evaluateJavaScriptInBrowser("document.title") }
+            g_idle_add({ _ -> gboolean in
+                pendingSocketAction?(); pendingSocketAction = nil; return 0
+            }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "browser.get.text":
+            let selector = request.params?["selector"] ?? "body"
+            let js = "document.querySelector('\(selector)')?.textContent ?? ''"
+            pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+            g_idle_add({ _ -> gboolean in
+                pendingSocketAction?(); pendingSocketAction = nil; return 0
+            }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "browser.get.html":
+            let selector = request.params?["selector"] ?? "body"
+            let js = "document.querySelector('\(selector)')?.innerHTML ?? ''"
+            pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+            g_idle_add({ _ -> gboolean in
+                pendingSocketAction?(); pendingSocketAction = nil; return 0
+            }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "browser.click":
+            let selector = request.params?["selector"] ?? ""
+            if !selector.isEmpty {
+                let js = "document.querySelector('\(selector)')?.click()"
+                pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+                g_idle_add({ _ -> gboolean in
+                    pendingSocketAction?(); pendingSocketAction = nil; return 0
+                }, nil)
+                return successResponse(id: id, result: ["ok": "true"])
+            }
+            return errorResponse(id: id, code: -32602, message: "Missing 'selector' parameter")
+
+        case "browser.type":
+            let selector = request.params?["selector"] ?? ""
+            let text = request.params?["text"] ?? ""
+            if !selector.isEmpty {
+                let escaped = text.replacingOccurrences(of: "'", with: "\\'")
+                let js = """
+                (function(){var el=document.querySelector('\(selector)');
+                if(el){el.focus();el.value='\(escaped)';
+                el.dispatchEvent(new Event('input',{bubbles:true}));}})()
+                """
+                pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+                g_idle_add({ _ -> gboolean in
+                    pendingSocketAction?(); pendingSocketAction = nil; return 0
+                }, nil)
+                return successResponse(id: id, result: ["ok": "true"])
+            }
+            return errorResponse(id: id, code: -32602, message: "Missing 'selector' parameter")
+
+        case "browser.fill":
+            let selector = request.params?["selector"] ?? ""
+            let value = request.params?["value"] ?? ""
+            if !selector.isEmpty {
+                let escaped = value.replacingOccurrences(of: "'", with: "\\'")
+                let js = """
+                (function(){var el=document.querySelector('\(selector)');
+                if(el){el.value='\(escaped)';
+                el.dispatchEvent(new Event('input',{bubbles:true}));
+                el.dispatchEvent(new Event('change',{bubbles:true}));}})()
+                """
+                pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+                g_idle_add({ _ -> gboolean in
+                    pendingSocketAction?(); pendingSocketAction = nil; return 0
+                }, nil)
+                return successResponse(id: id, result: ["ok": "true"])
+            }
+            return errorResponse(id: id, code: -32602, message: "Missing 'selector' parameter")
+
+        case "browser.scroll":
+            let x = request.params?["x"] ?? "0"
+            let y = request.params?["y"] ?? "100"
+            let js = "window.scrollBy(\(x), \(y))"
+            pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+            g_idle_add({ _ -> gboolean in
+                pendingSocketAction?(); pendingSocketAction = nil; return 0
+            }, nil)
+            return successResponse(id: id, result: ["ok": "true"])
+
+        case "browser.is.visible":
+            let selector = request.params?["selector"] ?? ""
+            if !selector.isEmpty {
+                let js = "(function(){var el=document.querySelector('\(selector)');return el?getComputedStyle(el).display!=='none'&&getComputedStyle(el).visibility!=='hidden':'false';})()"
+                pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+                g_idle_add({ _ -> gboolean in
+                    pendingSocketAction?(); pendingSocketAction = nil; return 0
+                }, nil)
+                return successResponse(id: id, result: ["ok": "true"])
+            }
+            return errorResponse(id: id, code: -32602, message: "Missing 'selector' parameter")
+
+        case "browser.wait":
+            let selector = request.params?["selector"] ?? ""
+            let timeout = request.params?["timeout"] ?? "5000"
+            if !selector.isEmpty {
+                let js = """
+                new Promise((resolve)=>{
+                    var el=document.querySelector('\(selector)');
+                    if(el){resolve('found');return;}
+                    var obs=new MutationObserver(()=>{
+                        if(document.querySelector('\(selector)')){obs.disconnect();resolve('found');}
+                    });
+                    obs.observe(document.body,{childList:true,subtree:true});
+                    setTimeout(()=>{obs.disconnect();resolve('timeout');},\(timeout));
+                })
+                """
+                pendingSocketAction = { evaluateJavaScriptInBrowser(js) }
+                g_idle_add({ _ -> gboolean in
+                    pendingSocketAction?(); pendingSocketAction = nil; return 0
+                }, nil)
+                return successResponse(id: id, result: ["ok": "true"])
+            }
+            return errorResponse(id: id, code: -32602, message: "Missing 'selector' parameter")
+
         default:
             return errorResponse(id: id, code: -32601, message: "Method not found: \(request.method)")
         }
+    }
+
+    // MARK: - Helper methods for complex commands
+
+    private func handleCapabilities(id: Int?) -> SocketResponse {
+        let methods = [
+            "system.ping", "system.capabilities", "system.identify", "system.ready",
+            "system.status", "system.tree",
+            "workspace.list", "workspace.create", "workspace.select", "workspace.current",
+            "workspace.close", "workspace.next", "workspace.previous", "workspace.last",
+            "workspace.rename", "workspace.reorder", "workspace.split",
+            "surface.list", "surface.current", "surface.focus", "surface.split",
+            "surface.create", "surface.close", "surface.send_text", "surface.send_key",
+            "surface.pty_write", "surface.read_text", "surface.clear_history",
+            "surface.refresh", "surface.health", "surface.size",
+            "pane.list", "pane.focus", "pane.create", "pane.last", "pane.surfaces",
+            "notify", "notification.create", "notification.create_for_surface",
+            "notification.create_for_target", "notification.list", "notification.clear",
+            "window.resize",
+            "browser.open", "browser.navigate", "browser.eval", "browser.snapshot",
+            "browser.back", "browser.forward", "browser.reload", "browser.url.get",
+            "browser.click", "browser.type", "browser.fill", "browser.scroll",
+            "browser.wait", "browser.get.text", "browser.get.html", "browser.get.title",
+            "browser.is.visible",
+        ].sorted()
+        return SocketResponse(jsonrpc: "2.0", result: AnyCodable([
+            "protocol": "cmux-socket",
+            "version": "2",
+            "platform": "linux",
+            "methods": methods.joined(separator: ","),
+            "method_count": String(methods.count),
+        ]), error: nil, id: id)
+    }
+
+    private func handleSystemTree(id: Int?) -> SocketResponse {
+        var tree: [[String: String]] = []
+        for (i, ws) in workspaceManager.workspaces.enumerated() {
+            tree.append([
+                "type": "workspace",
+                "id": String(ws.id),
+                "index": String(i + 1),
+                "title": ws.title,
+                "cwd": ws.cwd,
+                "active": i == workspaceManager.activeIndex ? "true" : "false",
+                "has_surface": ws.surface != nil ? "true" : "false",
+                "git_branch": ws.gitBranch ?? "",
+            ])
+        }
+        return SocketResponse(jsonrpc: "2.0", result: AnyCodable(tree), error: nil, id: id)
+    }
+
+    private func handleSurfaceList(id: Int?) -> SocketResponse {
+        var surfaces: [[String: String]] = []
+        for (i, ws) in workspaceManager.workspaces.enumerated() {
+            surfaces.append([
+                "id": String(ws.id),
+                "workspace_id": String(ws.id),
+                "index": String(i + 1),
+                "title": ws.title,
+                "cwd": ws.cwd,
+                "active": i == workspaceManager.activeIndex ? "true" : "false",
+                "has_surface": ws.surface != nil ? "true" : "false",
+            ])
+        }
+        return SocketResponse(jsonrpc: "2.0", result: AnyCodable(surfaces), error: nil, id: id)
+    }
+
+    private func handleReadText(id: Int?, params: [String: String]?) -> SocketResponse {
+        guard let surface = workspaceManager.activeSurface,
+              let gApp = getGhosttyApp() else {
+            return errorResponse(id: id, code: -32000, message: "No active surface")
+        }
+        // Use the C helper to read terminal text via ghostty_surface_read_text
+        if let text = cmux_ghostty_read_surface_text(surface) {
+            let result = String(cString: text)
+            free(text)
+            return SocketResponse(jsonrpc: "2.0", result: AnyCodable(["text": result]), error: nil, id: id)
+        }
+        return errorResponse(id: id, code: -32000, message: "Failed to read terminal text")
     }
 
     private func successResponse(id: Int?, result: [String: String]) -> SocketResponse {

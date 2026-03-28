@@ -14,16 +14,28 @@ Commands:
   cmux status                Show comprehensive app status
   cmux identify              Show app info (version, pid)
   cmux list                  List all workspaces
+  cmux surfaces              List all surfaces
+  cmux current               Show current workspace details
   cmux new [dir] [title]     Create new workspace
   cmux select <index>        Switch to workspace (1-based)
+  cmux next / prev / last    Navigate workspaces
   cmux close                 Close active workspace
+  cmux rename <title>        Rename active workspace
+  cmux reorder <from> <to>   Reorder workspace positions
   cmux split [h|v]           Split pane (horizontal/vertical)
   cmux send <text>           Send text to active terminal
+  cmux read                  Read terminal text (visible content)
+  cmux clear-history         Clear terminal scrollback
   cmux browser [url]         Open browser in split
   cmux navigate <url>        Navigate browser to URL
   cmux eval <javascript>     Execute JS in browser
   cmux snapshot              Get browser DOM snapshot (for agents)
   cmux notify <title> [body] Send notification
+  cmux notifications         List notifications
+  cmux clear-notifications   Clear all notifications
+  cmux ping                  Ping cmux (heartbeat)
+  cmux caps                  List all supported commands
+  cmux tree                  Show workspace/surface tree
 
 Environment:
   CMUX_SOCKET    Path to cmux Unix socket (auto-detected)
@@ -34,7 +46,10 @@ Examples:
   cmux split vertical
   cmux send "ls -la\n"
   cmux select 2
-  cmux list
+  cmux next
+  cmux read
+  cmux rename "my-workspace"
+  cmux caps
 HELPTEXT
     exit 0
 fi
@@ -139,6 +154,98 @@ for ws in data.get('result', []):
         send "{\"jsonrpc\":\"2.0\",\"method\":\"notify\",\"params\":{\"title\":\"$TITLE\",\"body\":\"$BODY\"},\"id\":1}"
         ;;
 
+    # Workspace navigation
+    next)
+        send '{"jsonrpc":"2.0","method":"workspace.next","id":1}'
+        ;;
+    prev|previous)
+        send '{"jsonrpc":"2.0","method":"workspace.previous","id":1}'
+        ;;
+    last)
+        send '{"jsonrpc":"2.0","method":"workspace.last","id":1}'
+        ;;
+    current)
+        send '{"jsonrpc":"2.0","method":"workspace.current","id":1}' | python3 -c "
+import sys, json
+d = json.load(sys.stdin).get('result', {})
+print(f\"Workspace {d.get('index', '?')}: {d.get('title', '?')}\")
+print(f\"CWD: {d.get('cwd', '?')}\")
+if d.get('git_branch'): print(f\"Branch: {d.get('git_branch')}\")
+" 2>/dev/null || send '{"jsonrpc":"2.0","method":"workspace.current","id":1}'
+        ;;
+    rename)
+        TITLE="${1:?Usage: cmux rename <title>}"
+        TITLE=$(echo "$TITLE" | sed 's/"/\\"/g')
+        send "{\"jsonrpc\":\"2.0\",\"method\":\"workspace.rename\",\"params\":{\"title\":\"$TITLE\"},\"id\":1}"
+        ;;
+    reorder)
+        FROM="${1:?Usage: cmux reorder <from> <to>}"
+        TO="${2:?Usage: cmux reorder <from> <to>}"
+        send "{\"jsonrpc\":\"2.0\",\"method\":\"workspace.reorder\",\"params\":{\"from\":\"$FROM\",\"to\":\"$TO\"},\"id\":1}"
+        ;;
+
+    # Surface commands
+    read|read-text)
+        send '{"jsonrpc":"2.0","method":"surface.read_text","id":1}' | python3 -c "
+import sys, json
+d = json.load(sys.stdin).get('result', {})
+print(d.get('text', ''))
+" 2>/dev/null || send '{"jsonrpc":"2.0","method":"surface.read_text","id":1}'
+        ;;
+    clear-history)
+        send '{"jsonrpc":"2.0","method":"surface.clear_history","id":1}'
+        ;;
+    surfaces)
+        send '{"jsonrpc":"2.0","method":"surface.list","id":1}' | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for s in data.get('result', []):
+    marker = '▸' if s.get('active') == 'true' else ' '
+    print(f\"{marker} {s['index']}: {s.get('title', '?')} [{s.get('cwd', '?')}]\")
+" 2>/dev/null || send '{"jsonrpc":"2.0","method":"surface.list","id":1}'
+        ;;
+
+    # System commands
+    ping)
+        send '{"jsonrpc":"2.0","method":"system.ping","id":1}'
+        ;;
+    capabilities|caps)
+        send '{"jsonrpc":"2.0","method":"system.capabilities","id":1}' | python3 -c "
+import sys, json
+d = json.load(sys.stdin).get('result', {})
+methods = d.get('methods', '').split(',')
+print(f\"Protocol: {d.get('protocol', '?')} v{d.get('version', '?')}\")
+print(f\"Platform: {d.get('platform', '?')}\")
+print(f\"Commands: {d.get('method_count', '?')}\")
+for m in sorted(methods):
+    if m: print(f\"  {m}\")
+" 2>/dev/null || send '{"jsonrpc":"2.0","method":"system.capabilities","id":1}'
+        ;;
+    tree)
+        send '{"jsonrpc":"2.0","method":"system.tree","id":1}' | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for node in data.get('result', []):
+    active = '▸' if node.get('active') == 'true' else ' '
+    branch = f\" [{node.get('git_branch')}]\" if node.get('git_branch') else ''
+    print(f\"{active} {node.get('type', '?')} {node.get('index', '?')}: {node.get('title', '?')}{branch}\")
+" 2>/dev/null || send '{"jsonrpc":"2.0","method":"system.tree","id":1}'
+        ;;
+
+    # Notification management
+    notifications)
+        send '{"jsonrpc":"2.0","method":"notification.list","id":1}' | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for n in data.get('result', []):
+    print(f\"ws{n.get('workspace_id', '?')}: {n.get('message', '?')}\")
+if not data.get('result'): print('No notifications')
+" 2>/dev/null || send '{"jsonrpc":"2.0","method":"notification.list","id":1}'
+        ;;
+    clear-notifications)
+        send '{"jsonrpc":"2.0","method":"notification.clear","id":1}'
+        ;;
+
     help|--help|-h)
         cat <<'HELP'
 cmux — control cmux-linux via socket API
@@ -147,16 +254,30 @@ Commands:
   cmux status                Show comprehensive app status
   cmux identify              Show app info (version, pid)
   cmux list                  List all workspaces
+  cmux surfaces              List all surfaces
+  cmux current               Show current workspace details
   cmux new [dir] [title]     Create new workspace
   cmux select <index>        Switch to workspace (1-based)
+  cmux next                  Switch to next workspace
+  cmux prev                  Switch to previous workspace
+  cmux last                  Switch to last workspace
   cmux close                 Close active workspace
+  cmux rename <title>        Rename active workspace
+  cmux reorder <from> <to>   Reorder workspace positions
   cmux split [h|v]           Split pane (horizontal/vertical)
   cmux send <text>           Send text to active terminal
+  cmux read                  Read terminal text (visible content)
+  cmux clear-history         Clear terminal scrollback
   cmux browser [url]         Open browser in split
   cmux navigate <url>        Navigate browser to URL
   cmux eval <javascript>     Execute JS in browser
   cmux snapshot              Get browser DOM snapshot (for agents)
   cmux notify <title> [body] Send notification
+  cmux notifications         List notifications
+  cmux clear-notifications   Clear all notifications
+  cmux ping                  Ping cmux (heartbeat)
+  cmux caps                  List all supported commands
+  cmux tree                  Show workspace/surface tree
 
 Environment:
   CMUX_SOCKET    Path to cmux Unix socket (auto-detected)

@@ -257,6 +257,54 @@ char* cmux_ghostty_copy_selection(ghostty_surface_t surface) {
     return result;
 }
 
+// Read visible terminal text via ghostty_surface_read_text
+// Uses the struct types from ghostty.h via dlsym
+typedef struct {
+    int tag;
+    int coord;
+    uint32_t x;
+    uint32_t y;
+} cmux_point_s;
+
+typedef struct {
+    cmux_point_s top_left;
+    cmux_point_s bottom_right;
+    bool rectangle;
+} cmux_selection_s;
+
+typedef bool (*ghostty_surface_read_text_fn)(ghostty_surface_t, cmux_selection_s, ghostty_text_s*);
+static ghostty_surface_read_text_fn g_read_text = NULL;
+
+void cmux_ghostty_resolve_read_text_fn(void* lib_handle) {
+    g_read_text = dlsym(lib_handle, "ghostty_surface_read_text");
+}
+
+char* cmux_ghostty_read_surface_text(ghostty_surface_t surface) {
+    if (!g_read_text || !g_free_text || !surface) return NULL;
+
+    // Select full viewport: top-left (0,0) to bottom-right (9999,9999)
+    cmux_selection_s sel = {
+        .top_left = { .tag = 1, .coord = 1, .x = 0, .y = 0 },       // VIEWPORT, TOP_LEFT
+        .bottom_right = { .tag = 1, .coord = 2, .x = 9999, .y = 9999 }, // VIEWPORT, BOTTOM_RIGHT
+        .rectangle = false,
+    };
+
+    ghostty_text_s text = {0};
+    if (!g_read_text(surface, sel, &text)) return NULL;
+    if (!text.text || text.text_len == 0) {
+        g_free_text(surface, &text);
+        return NULL;
+    }
+
+    char* result = malloc(text.text_len + 1);
+    if (result) {
+        memcpy(result, text.text, text.text_len);
+        result[text.text_len] = '\0';
+    }
+    g_free_text(surface, &text);
+    return result;
+}
+
 // Check GL error state (for debugging)
 int cmux_check_gl_error(void) {
     // Try to call glGetError if GLAD is loaded

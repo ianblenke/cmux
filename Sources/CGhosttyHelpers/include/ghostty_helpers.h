@@ -48,3 +48,8 @@ void cmux_ghostty_paste_from_clipboard(void* surface);
 void cmux_ghostty_resolve_selection_fns(void* lib_handle);
 // Returns malloc'd string (caller must free), or NULL if no selection
 char* cmux_ghostty_copy_selection(void* surface);
+
+// Terminal text reading
+void cmux_ghostty_resolve_read_text_fn(void* lib_handle);
+// Returns malloc'd string of visible terminal text (caller must free), or NULL
+char* cmux_ghostty_read_surface_text(void* surface);
