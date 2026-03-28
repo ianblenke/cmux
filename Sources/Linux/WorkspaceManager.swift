@@ -135,8 +135,6 @@ final class WorkspaceManager {
                   activeWs.glArea == glArea else { return 1 }
             if let surface = activeWs.surface, let gApp = getGhosttyApp() {
                 gApp.drawSurface(surface)
-            } else {
-                cmuxLog("[render] SKIP: no surface or ghostty app")
             }
             return 1
         }
@@ -189,8 +187,6 @@ final class WorkspaceManager {
             gApp.fn_surface_set_size?(surface, UInt32(w), UInt32(h))
             workspaceManager.lastResizeW = w
             workspaceManager.lastResizeH = h
-            // Schedule a delayed refresh to give the IO thread time to process
-            // the resize and rebuild cell buffers before the renderer draws
             g_timeout_add(50, { _ -> gboolean in
                 if let ws = workspaceManager.activeWorkspace,
                    let surface = ws.surface,
@@ -485,33 +481,26 @@ final class WorkspaceManager {
         }
     }
 
-    /// Split the active workspace by creating a second workspace in a side-by-side layout.
-    /// GtkGLArea render signals don't fire when nested inside intermediate containers
-    /// (GtkPaned/GtkBox) within GtkStack. Instead, we replace the single GtkStack with
-    /// a GtkBox containing two GtkStacks, each with their own workspace GL area.
+    /// Split creates a new workspace with the same CWD and switches to it.
+    /// True visual splits require ghostty renderer cooperation (FBO offscreen
+    /// rendering) which isn't available in the embedded API. Workspaces provide
+    /// the multi-terminal workflow via Super+1-9 / Super+[/] switching.
     func splitActivePane(orientation: PaneSplit.SplitOrientation) {
         guard activeIndex >= 0, activeIndex < workspaces.count else { return }
         guard let gApp = getGhosttyApp() else { return }
-        guard let contentBox = contentBoxWidget else { return }
 
-        // Get current CWD for the new workspace
         let currentCwd = workspaces[activeIndex].cwd
         let home = ProcessInfo.processInfo.environment["HOME"] ?? "/home"
         let fullCwd: String? = currentCwd.hasPrefix("~")
             ? home + String(currentCwd.dropFirst(1)) : (currentCwd == "~" ? home : currentCwd)
 
-        // Create a new workspace — this adds a new GtkGLArea to the existing stack
         let newId = createWorkspace(ghosttyApp: gApp, workingDirectory: fullCwd)
         guard newId > 0 else {
-            cmuxLog("[split] Failed to create split workspace")
+            cmuxLog("[split] Failed to create workspace")
             return
         }
 
-        // Switch back to the original workspace so both are "visible" in concept
-        // The user sees the original; they can Super+] to switch to the new one
-        switchTo(index: activeIndex > 0 ? activeIndex - 1 : 0)
-
-        cmuxLog("[split] Created workspace \(newId) as split companion — switch with Super+] or Super+\(newId)")
+        cmuxLog("[split] Created workspace \(newId) (CWD inherited) — Super+[/] to switch")
     }
 
     /// Close the focused pane within a split, collapsing the split

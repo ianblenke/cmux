@@ -305,6 +305,146 @@ char* cmux_ghostty_read_surface_text(ghostty_surface_t surface) {
     return result;
 }
 
+// GL split compositor — uses FBOs to capture ghostty draws and blit to screen regions.
+// All GL functions resolved via dlsym since we don't link GL directly.
+
+#include "ghostty_helpers.h"
+
+#define GL_FRAMEBUFFER           0x8D40
+#define GL_READ_FRAMEBUFFER      0x8CA8
+#define GL_DRAW_FRAMEBUFFER      0x8CA9
+#define GL_COLOR_ATTACHMENT0     0x8CE0
+#define GL_TEXTURE_2D            0x0DE1
+#define GL_RGBA8                 0x8058
+#define GL_RGBA                  0x1908
+#define GL_UNSIGNED_BYTE         0x1401
+#define GL_COLOR_BUFFER_BIT      0x00004000
+#define GL_NEAREST               0x2600
+#define GL_FRAMEBUFFER_COMPLETE  0x8CD5
+
+typedef void (*glGenFramebuffers_fn)(int, unsigned int*);
+typedef void (*glDeleteFramebuffers_fn)(int, const unsigned int*);
+typedef void (*glBindFramebuffer_fn)(unsigned int, unsigned int);
+typedef void (*glFramebufferTexture2D_fn)(unsigned int, unsigned int, unsigned int, unsigned int, int);
+typedef unsigned int (*glCheckFramebufferStatus_fn)(unsigned int);
+typedef void (*glGenTextures_fn)(int, unsigned int*);
+typedef void (*glDeleteTextures_fn)(int, const unsigned int*);
+typedef void (*glBindTexture_fn)(unsigned int, unsigned int);
+typedef void (*glTexImage2D_fn)(unsigned int, int, int, int, int, int, unsigned int, unsigned int, const void*);
+typedef void (*glTexParameteri_fn)(unsigned int, unsigned int, int);
+typedef void (*glBlitFramebuffer_fn)(int,int,int,int,int,int,int,int,unsigned int,unsigned int);
+typedef void (*glViewport_fn)(int, int, int, int);
+
+static glGenFramebuffers_fn gl_GenFramebuffers;
+static glDeleteFramebuffers_fn gl_DeleteFramebuffers;
+static glBindFramebuffer_fn gl_BindFramebuffer;
+static glFramebufferTexture2D_fn gl_FramebufferTexture2D;
+static glCheckFramebufferStatus_fn gl_CheckFramebufferStatus;
+static glGenTextures_fn gl_GenTextures;
+static glDeleteTextures_fn gl_DeleteTextures;
+static glBindTexture_fn gl_BindTexture;
+static glTexImage2D_fn gl_TexImage2D;
+static glTexParameteri_fn gl_TexParameteri;
+static glBlitFramebuffer_fn gl_BlitFramebuffer;
+static glViewport_fn gl_Viewport;
+
+static int gl_fns_resolved = 0;
+
+static void resolve_all_gl(void) {
+    if (gl_fns_resolved) return;
+    gl_GenFramebuffers = dlsym(NULL, "glGenFramebuffers");
+    gl_DeleteFramebuffers = dlsym(NULL, "glDeleteFramebuffers");
+    gl_BindFramebuffer = dlsym(NULL, "glBindFramebuffer");
+    gl_FramebufferTexture2D = dlsym(NULL, "glFramebufferTexture2D");
+    gl_CheckFramebufferStatus = dlsym(NULL, "glCheckFramebufferStatus");
+    gl_GenTextures = dlsym(NULL, "glGenTextures");
+    gl_DeleteTextures = dlsym(NULL, "glDeleteTextures");
+    gl_BindTexture = dlsym(NULL, "glBindTexture");
+    gl_TexImage2D = dlsym(NULL, "glTexImage2D");
+    gl_TexParameteri = dlsym(NULL, "glTexParameteri");
+    gl_BlitFramebuffer = dlsym(NULL, "glBlitFramebuffer");
+    gl_Viewport = dlsym(NULL, "glViewport");
+    gl_fns_resolved = 1;
+}
+
+int cmux_gl_get_draw_framebuffer(void) {
+    resolve_all_gl();
+    typedef void (*glGetIntegerv_fn)(unsigned int, int*);
+    static glGetIntegerv_fn gl_GetIntegerv = NULL;
+    if (!gl_GetIntegerv) gl_GetIntegerv = dlsym(NULL, "glGetIntegerv");
+    if (!gl_GetIntegerv) return 0;
+    int fbo = 0;
+    gl_GetIntegerv(0x8CA6, &fbo); // GL_DRAW_FRAMEBUFFER_BINDING
+    return fbo;
+}
+
+void cmux_split_init(cmux_split_compositor* comp) {
+    memset(comp, 0, sizeof(*comp));
+    resolve_all_gl();
+    if (!gl_GenFramebuffers || !gl_GenTextures) return;
+    gl_GenFramebuffers(2, comp->fbo);
+    gl_GenTextures(2, comp->tex);
+    comp->initialized = 1;
+}
+
+void cmux_split_destroy(cmux_split_compositor* comp) {
+    if (!comp->initialized) return;
+    gl_DeleteFramebuffers(2, comp->fbo);
+    gl_DeleteTextures(2, comp->tex);
+    memset(comp, 0, sizeof(*comp));
+}
+
+void cmux_split_resize(cmux_split_compositor* comp, int idx, int w, int h) {
+    if (!comp->initialized || idx < 0 || idx > 1) return;
+    if (comp->width[idx] == w && comp->height[idx] == h) return;
+    comp->width[idx] = w;
+    comp->height[idx] = h;
+
+    // Allocate/resize the texture
+    gl_BindTexture(GL_TEXTURE_2D, comp->tex[idx]);
+    gl_TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    gl_TexParameteri(GL_TEXTURE_2D, 0x2801, GL_NEAREST); // GL_TEXTURE_MIN_FILTER
+    gl_TexParameteri(GL_TEXTURE_2D, 0x2800, GL_NEAREST); // GL_TEXTURE_MAG_FILTER
+    gl_BindTexture(GL_TEXTURE_2D, 0);
+
+    // Attach to FBO
+    gl_BindFramebuffer(GL_FRAMEBUFFER, comp->fbo[idx]);
+    gl_FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, comp->tex[idx], 0);
+    gl_BindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+void cmux_split_bind(cmux_split_compositor* comp, int idx) {
+    if (!comp->initialized || idx < 0 || idx > 1) return;
+    gl_BindFramebuffer(GL_DRAW_FRAMEBUFFER, comp->fbo[idx]);
+    if (gl_Viewport) gl_Viewport(0, 0, comp->width[idx], comp->height[idx]);
+}
+
+void cmux_split_unbind(cmux_split_compositor* comp, int default_fbo) {
+    if (!comp->initialized) return;
+    gl_BindFramebuffer(GL_DRAW_FRAMEBUFFER, (unsigned int)default_fbo);
+}
+
+void cmux_split_present(cmux_split_compositor* comp, int default_fbo,
+                        int x0, int y0, int w0, int h0,
+                        int x1, int y1, int w1, int h1) {
+    if (!comp->initialized) return;
+
+    // Blit surface 0 to screen region (x0,y0,w0,h0)
+    gl_BindFramebuffer(GL_READ_FRAMEBUFFER, comp->fbo[0]);
+    gl_BindFramebuffer(GL_DRAW_FRAMEBUFFER, (unsigned int)default_fbo);
+    gl_BlitFramebuffer(0, 0, comp->width[0], comp->height[0],
+                       x0, y0, x0 + w0, y0 + h0,
+                       GL_COLOR_BUFFER_BIT, GL_NEAREST);
+
+    // Blit surface 1 to screen region (x1,y1,w1,h1)
+    gl_BindFramebuffer(GL_READ_FRAMEBUFFER, comp->fbo[1]);
+    gl_BlitFramebuffer(0, 0, comp->width[1], comp->height[1],
+                       x1, y1, x1 + w1, y1 + h1,
+                       GL_COLOR_BUFFER_BIT, GL_NEAREST);
+
+    gl_BindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+}
+
 // Check GL error state (for debugging)
 int cmux_check_gl_error(void) {
     // Try to call glGetError if GLAD is loaded
