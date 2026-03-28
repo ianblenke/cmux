@@ -482,11 +482,14 @@ final class WorkspaceManager {
     }
 
     /// Split creates a new workspace with the same CWD.
-    /// True visual splits via FBO compositing are blocked by ghostty's present()
-    /// not correctly blitting to external FBOs on Wayland/EGL. The offscreen
-    /// rendering API (ghostty_surface_set_draw_framebuffer) is available in the
-    /// fork but needs further debugging. Workspaces provide the multi-terminal
-    /// workflow via Super+1-9 / Super+[/] switching.
+    /// Visual splits are blocked by two issues:
+    /// 1. GtkGLArea render signal doesn't fire in nested containers (GtkPaned/GtkBox in GtkStack)
+    /// 2. Two ghostty surfaces sharing one GtkGLArea causes the render loop to stall
+    ///    after a few frames (ghostty's GLAD/GL state conflicts between surfaces).
+    /// The ghostty fork has ghostty_surface_set_draw_framebuffer for FBO redirection,
+    /// and cmux has an FBO compositor (cmux_split_init/present). Single-surface FBO
+    /// redirect works (107+ frames). Two-surface draws stall after ~6 frames.
+    /// Fix requires ghostty to support multiple independent renderers per GL context.
     func splitActivePane(orientation: PaneSplit.SplitOrientation) {
         guard activeIndex >= 0, activeIndex < workspaces.count else { return }
         guard let gApp = getGhosttyApp() else { return }
