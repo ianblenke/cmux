@@ -349,21 +349,35 @@ static glBlitFramebuffer_fn gl_BlitFramebuffer;
 static glViewport_fn gl_Viewport;
 
 static int gl_fns_resolved = 0;
+static void* gl_lib_handle = NULL;
+
+static void* gl_sym(const char* name) {
+    // Try RTLD_DEFAULT first (works when GL is already loaded)
+    void* p = dlsym(RTLD_DEFAULT, name);
+    if (p) return p;
+    // Fall back to explicit libGL
+    if (!gl_lib_handle) {
+        gl_lib_handle = dlopen("libGL.so.1", RTLD_NOW);
+        if (!gl_lib_handle) gl_lib_handle = dlopen("libGL.so", RTLD_NOW);
+    }
+    if (gl_lib_handle) return dlsym(gl_lib_handle, name);
+    return NULL;
+}
 
 static void resolve_all_gl(void) {
     if (gl_fns_resolved) return;
-    gl_GenFramebuffers = dlsym(NULL, "glGenFramebuffers");
-    gl_DeleteFramebuffers = dlsym(NULL, "glDeleteFramebuffers");
-    gl_BindFramebuffer = dlsym(NULL, "glBindFramebuffer");
-    gl_FramebufferTexture2D = dlsym(NULL, "glFramebufferTexture2D");
-    gl_CheckFramebufferStatus = dlsym(NULL, "glCheckFramebufferStatus");
-    gl_GenTextures = dlsym(NULL, "glGenTextures");
-    gl_DeleteTextures = dlsym(NULL, "glDeleteTextures");
-    gl_BindTexture = dlsym(NULL, "glBindTexture");
-    gl_TexImage2D = dlsym(NULL, "glTexImage2D");
-    gl_TexParameteri = dlsym(NULL, "glTexParameteri");
-    gl_BlitFramebuffer = dlsym(NULL, "glBlitFramebuffer");
-    gl_Viewport = dlsym(NULL, "glViewport");
+    gl_GenFramebuffers = gl_sym("glGenFramebuffers");
+    gl_DeleteFramebuffers = gl_sym("glDeleteFramebuffers");
+    gl_BindFramebuffer = gl_sym("glBindFramebuffer");
+    gl_FramebufferTexture2D = gl_sym("glFramebufferTexture2D");
+    gl_CheckFramebufferStatus = gl_sym("glCheckFramebufferStatus");
+    gl_GenTextures = gl_sym("glGenTextures");
+    gl_DeleteTextures = gl_sym("glDeleteTextures");
+    gl_BindTexture = gl_sym("glBindTexture");
+    gl_TexImage2D = gl_sym("glTexImage2D");
+    gl_TexParameteri = gl_sym("glTexParameteri");
+    gl_BlitFramebuffer = gl_sym("glBlitFramebuffer");
+    gl_Viewport = gl_sym("glViewport");
     gl_fns_resolved = 1;
 }
 
@@ -381,10 +395,19 @@ int cmux_gl_get_draw_framebuffer(void) {
 void cmux_split_init(cmux_split_compositor* comp) {
     memset(comp, 0, sizeof(*comp));
     resolve_all_gl();
-    if (!gl_GenFramebuffers || !gl_GenTextures) return;
+    if (!gl_GenFramebuffers || !gl_GenTextures) {
+        fprintf(stderr, "[split-compositor] GL functions not resolved: GenFB=%p GenTex=%p\n",
+                (void*)gl_GenFramebuffers, (void*)gl_GenTextures);
+        return;
+    }
     gl_GenFramebuffers(2, comp->fbo);
     gl_GenTextures(2, comp->tex);
-    comp->initialized = 1;
+    fprintf(stderr, "[split-compositor] Init: fbo=[%u,%u] tex=[%u,%u]\n",
+            comp->fbo[0], comp->fbo[1], comp->tex[0], comp->tex[1]);
+    comp->initialized = (comp->fbo[0] != 0 && comp->fbo[1] != 0) ? 1 : 0;
+    if (!comp->initialized) {
+        fprintf(stderr, "[split-compositor] FBO creation failed (GL context not current?)\n");
+    }
 }
 
 void cmux_split_destroy(cmux_split_compositor* comp) {

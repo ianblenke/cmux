@@ -195,7 +195,7 @@ final class WorkspaceManager {
                     gApp.fn_surface_refresh?(surface)
                     gtk_gl_area_queue_render(glArea)
                 }
-                return 0  // don't repeat
+                return 0
             }, nil)
         }
         g_signal_connect_data(newGlArea, "resize",
@@ -481,10 +481,12 @@ final class WorkspaceManager {
         }
     }
 
-    /// Split creates a new workspace with the same CWD and switches to it.
-    /// True visual splits require ghostty renderer cooperation (FBO offscreen
-    /// rendering) which isn't available in the embedded API. Workspaces provide
-    /// the multi-terminal workflow via Super+1-9 / Super+[/] switching.
+    /// Split creates a new workspace with the same CWD.
+    /// True visual splits via FBO compositing are blocked by ghostty's present()
+    /// not correctly blitting to external FBOs on Wayland/EGL. The offscreen
+    /// rendering API (ghostty_surface_set_draw_framebuffer) is available in the
+    /// fork but needs further debugging. Workspaces provide the multi-terminal
+    /// workflow via Super+1-9 / Super+[/] switching.
     func splitActivePane(orientation: PaneSplit.SplitOrientation) {
         guard activeIndex >= 0, activeIndex < workspaces.count else { return }
         guard let gApp = getGhosttyApp() else { return }

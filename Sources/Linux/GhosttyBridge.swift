@@ -109,6 +109,7 @@ final class GhosttyApp {
     var fn_surface_refresh: (@convention(c) (UnsafeMutableRawPointer?) -> Void)?
     var fn_surface_set_occlusion: (@convention(c) (UnsafeMutableRawPointer?, Bool) -> Void)?
     var fn_surface_reinit_renderer: (@convention(c) (UnsafeMutableRawPointer?) -> Bool)?
+    var fn_surface_set_draw_framebuffer: (@convention(c) (UnsafeMutableRawPointer?, UInt32) -> Void)?
     private var fn_surface_key: (@convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Bool)?
     private var fn_surface_text: (@convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UInt) -> Void)?
     private var fn_surface_mouse_button: (@convention(c) (UnsafeMutableRawPointer?, Int32, Int32, Int32) -> Bool)?
@@ -193,6 +194,12 @@ final class GhosttyApp {
         self.fn_surface_binding_action = surface_binding_action
         self.fn_surface_set_occlusion = surface_set_occlusion
         self.fn_surface_reinit_renderer = surface_reinit_renderer
+
+        // Optional: resolve offscreen rendering API (may not be present in older builds)
+        self.fn_surface_set_draw_framebuffer = sym("ghostty_surface_set_draw_framebuffer")
+        if self.fn_surface_set_draw_framebuffer != nil {
+            cmuxLog("[GhosttyBridge] Offscreen rendering API available")
+        }
 
         // Resolve C helper functions (for correct ABI calling convention)
         cmux_ghostty_resolve_key_fns(h)
