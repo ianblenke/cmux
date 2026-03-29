@@ -754,14 +754,18 @@ final class WorkspaceManager {
         showActiveInStack()
 
         pendingSplitReturnIndex = activeIndex
+        cmuxLog("[split] Switch trick: active=\(activeIndex) count=\(workspaces.count)")
         if workspaces.count > 1 {
             let awayIdx = activeIndex == 0 ? 1 : 0
+            cmuxLog("[split] Switching away to \(awayIdx), will return to \(pendingSplitReturnIndex)")
             switchTo(index: awayIdx)
             g_timeout_add(100, { _ -> gboolean in
                 let idx = workspaceManager.pendingSplitReturnIndex
                 workspaceManager.pendingSplitReturnIndex = -1
                 workspaceManager.splitTransitionInProgress = false
-                if idx >= 0 { workspaceManager.switchTo(index: idx) }
+                if idx >= 0 {
+                    workspaceManager.switchTo(index: idx)
+                }
                 return 0
             }, nil)
         } else {
