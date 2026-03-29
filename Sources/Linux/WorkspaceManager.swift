@@ -759,21 +759,23 @@ final class WorkspaceManager {
 
         // After reparenting, GtkGLArea render signal doesn't fire.
         // Workaround: switch away then back to force GTK to re-realize.
-        splitTransitionInProgress = false
+        // Keep splitTransitionInProgress=true until the return switch completes.
         pendingSplitReturnIndex = activeIndex
         if workspaces.count > 1 {
             let awayIdx = activeIndex == 0 ? 1 : 0
             switchTo(index: awayIdx)
-            g_timeout_add(50, { _ -> gboolean in
+            g_timeout_add(100, { _ -> gboolean in
                 if workspaceManager.pendingSplitReturnIndex >= 0 {
                     let idx = workspaceManager.pendingSplitReturnIndex
                     workspaceManager.pendingSplitReturnIndex = -1
+                    workspaceManager.splitTransitionInProgress = false
                     workspaceManager.switchTo(index: idx)
                 }
                 return 0
             }, nil)
         } else {
             pendingSplitReturnIndex = -1
+            splitTransitionInProgress = false
             showActiveInStack()
         }
 
