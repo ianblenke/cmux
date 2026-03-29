@@ -400,7 +400,7 @@ final class GhosttyApp {
 
     /// Send a key event to the ghostty surface via C helper (correct ABI).
     func sendKey(keycode: UInt32, text: String?, mods: Int32, action: Int32) -> Bool {
-        // Use the ACTIVE workspace's surface, falling back to any available surface
+        guard !workspaceManager.splitTransitionInProgress else { return false }
         let wsSurface = workspaceManager.activeSurface
         let targetSurface = wsSurface ?? surface
         guard let targetSurface = targetSurface else {
@@ -475,6 +475,7 @@ final class GhosttyApp {
     /// state: 0=release, 1=press
     /// button: 1=left, 2=right, 3=middle
     func mouseButton(state: Int32, button: Int32, mods: Int32) -> Bool {
+        guard !workspaceManager.splitTransitionInProgress else { return false }
         let target = workspaceManager.activeSurface ?? surface
         guard let target = target, let fn = fn_surface_mouse_button else { return false }
         return fn(target, state, button, mods)
@@ -482,6 +483,7 @@ final class GhosttyApp {
 
     /// Mouse position update
     func mousePos(x: Double, y: Double, mods: Int32) {
+        guard !workspaceManager.splitTransitionInProgress else { return }
         let target = workspaceManager.activeSurface ?? surface
         guard let target = target, let fn = fn_surface_mouse_pos else { return }
         fn(target, x, y, mods)
@@ -489,6 +491,7 @@ final class GhosttyApp {
 
     /// Mouse scroll
     func mouseScroll(dx: Double, dy: Double, mods: Int32) {
+        guard !workspaceManager.splitTransitionInProgress else { return }
         let target = workspaceManager.activeSurface ?? surface
         guard let target = target, let fn = fn_surface_mouse_scroll else { return }
         fn(target, dx, dy, mods)

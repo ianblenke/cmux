@@ -55,6 +55,9 @@ final class WorkspaceManager {
     /// Which surface in a split has keyboard focus (nil = primary surface)
     var splitFocusedSecond: Bool = false
 
+    /// True during split open/close to suppress mouse events to freed surfaces
+    var splitTransitionInProgress: Bool = false
+
     var activeSurface: UnsafeMutableRawPointer? {
         if let ws = activeWorkspace, ws.isSplit {
             return splitFocusedSecond ? ws.splitSecondSurface : ws.splitFirstSurface
@@ -707,6 +710,8 @@ final class WorkspaceManager {
         guard let gApp = getGhosttyApp() else { return }
         guard let firstGlArea = ws.splitFirstGlArea else { return }
 
+        splitTransitionInProgress = true
+
         // Save refs before clearing state
         let secondSurface = ws.splitSecondSurface ?? ws.splitSecondGlArea.flatMap({ paneManager.surfaceForGLArea($0) })
         let secondGlArea = ws.splitSecondGlArea
@@ -770,6 +775,7 @@ final class WorkspaceManager {
             gApp.fn_surface_refresh?(surface)
             gtk_gl_area_queue_render(glArea)
             _ = gtk_widget_grab_focus(widget)
+            workspaceManager.splitTransitionInProgress = false
             return 0
         }, nil)
 
