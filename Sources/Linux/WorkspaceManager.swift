@@ -152,6 +152,13 @@ final class WorkspaceManager {
 
         // Render callback
         let renderCb: @convention(c) (UnsafeMutablePointer<GtkGLArea>?, OpaquePointer?, gpointer?) -> gboolean = { glArea, ctx, _ in
+            // In split mode, the first pane uses splitFirstSurface
+            if let activeWs = workspaceManager.activeWorkspace, activeWs.isSplit {
+                if let s = activeWs.splitFirstSurface, activeWs.splitFirstGlArea == glArea {
+                    getGhosttyApp()?.drawSurface(s)
+                    return 1
+                }
+            }
             guard let activeWs = workspaceManager.activeWorkspace,
                   activeWs.glArea == glArea else { return 1 }
             if let surface = activeWs.surface, let gApp = getGhosttyApp() {
@@ -665,15 +672,20 @@ final class WorkspaceManager {
         let contentBoxPtr = unsafeBitCast(contentBox, to: UnsafeMutablePointer<GtkBox>.self)
         gtk_box_append(contentBoxPtr, paned)
 
-        // Enable auto_render on the reparented GtkGLArea (was disabled by
-        // showActiveInStack which sets all workspace GLAreas to auto_render=0)
+        // Enable auto_render and reinit after a delay to let GTK set up the new context
         gtk_gl_area_set_auto_render(existingGlArea, 1)
+        gtk_gl_area_queue_render(existingGlArea)
 
-        // Reinit renderer after reparent (GL context changed)
-        if let surface = ws.surface {
-            gtk_gl_area_make_current(existingGlArea)
+        g_timeout_add(100, { _ -> gboolean in
+            guard let ws = workspaceManager.activeWorkspace,
+                  let surface = ws.splitFirstSurface,
+                  let glArea = ws.splitFirstGlArea,
+                  let gApp = getGhosttyApp() else { return 0 }
+
+            gtk_gl_area_make_current(glArea)
             _ = gApp.fn_surface_reinit_renderer?(surface)
-            let widget = unsafeBitCast(existingGlArea, to: UnsafeMutablePointer<GtkWidget>.self)
+
+            let widget = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
             let w = gtk_widget_get_width(widget)
             let h = gtk_widget_get_height(widget)
             if w > 0 && h > 0 {
@@ -683,8 +695,9 @@ final class WorkspaceManager {
             }
             gApp.fn_surface_set_focus?(surface, true)
             gApp.fn_surface_refresh?(surface)
-            gtk_gl_area_queue_render(existingGlArea)
-        }
+            gtk_gl_area_queue_render(glArea)
+            return 0
+        }, nil)
 
         // Set divider to 50%
         let totalSize: Int32 = orientation == .horizontal
