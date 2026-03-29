@@ -82,9 +82,13 @@ private let closeSurfaceCb: @convention(c) (
     cmuxLog("[GhosttyBridge] Surface close requested (processActive=\(processActive))")
     g_idle_add({ _ -> gboolean in
         if appIsShuttingDown { return 0 }
-        // If the active workspace is split, collapse the split instead of closing
+        // If the active workspace is split, just mark the exited pane as dead.
+        // The remaining pane stays usable. User can Ctrl+Shift+W to fully close.
         if let ws = workspaceManager.activeWorkspace, ws.isSplit {
-            workspaceManager.closeSplit()
+            // Don't collapse — just log. The surface is already freed by ghostty.
+            // The dead pane will show grey but the other pane keeps working.
+            cmuxLog("[split] Shell exited in split pane — remaining pane still active")
+            return 0
         } else if workspaceManager.workspaces.count > 1 {
             workspaceManager.closeActive()
         } else {
