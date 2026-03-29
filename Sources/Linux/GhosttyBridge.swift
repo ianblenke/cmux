@@ -82,6 +82,9 @@ private let closeSurfaceCb: @convention(c) (
     cmuxLog("[GhosttyBridge] Surface close requested (processActive=\(processActive))")
     g_idle_add({ _ -> gboolean in
         if appIsShuttingDown { return 0 }
+        // Skip if we're in the middle of closing a split (second surface
+        // fires close callback when freed by closeSplit)
+        if workspaceManager.splitTransitionInProgress { return 0 }
         // If the active workspace is split, collapse back to single pane
         if let ws = workspaceManager.activeWorkspace, ws.isSplit {
             workspaceManager.closeSplit()
