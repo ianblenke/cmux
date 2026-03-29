@@ -680,8 +680,13 @@ final class WorkspaceManager {
             unsafeBitCast(splitFocusIn1, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
         addFocusCtrl(glArea1, focusCtrl1)
 
-        // Hide GtkStack (original workspace stays there untouched),
-        // show GtkPaned in content box
+        // Set workspace fields BEFORE adding paned to content box,
+        // because gtk_box_append triggers realize which needs these set.
+        workspaces[activeIndex].splitPanedWidget = paned
+        workspaces[activeIndex].splitFirstGlArea = glPtr1
+        workspaces[activeIndex].splitSecondGlArea = glPtr2
+
+        // Hide GtkStack, show GtkPaned in content box
         let stackWidget = unsafeBitCast(st, to: UnsafeMutablePointer<GtkWidget>.self)
         gtk_widget_set_visible(stackWidget, 0)
         let contentBoxPtr = unsafeBitCast(contentBox, to: UnsafeMutablePointer<GtkBox>.self)
@@ -692,10 +697,6 @@ final class WorkspaceManager {
             ? gtk_widget_get_width(unsafeBitCast(contentBox, to: UnsafeMutablePointer<GtkWidget>.self))
             : gtk_widget_get_height(unsafeBitCast(contentBox, to: UnsafeMutablePointer<GtkWidget>.self))
         if totalSize > 0 { gtk_paned_set_position(panedPtr, totalSize / 2) }
-
-        workspaces[activeIndex].splitPanedWidget = paned
-        workspaces[activeIndex].splitFirstGlArea = glPtr1
-        workspaces[activeIndex].splitSecondGlArea = glPtr2
 
         cmuxLog("[split] Visual split — two fresh panes, GtkStack hidden")
     }
