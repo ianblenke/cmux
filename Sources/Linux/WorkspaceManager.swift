@@ -622,40 +622,57 @@ final class WorkspaceManager {
             return (glArea, glPtr)
         }
 
-        // Create TWO fresh GtkGLAreas. Reparenting causes ghostty surface
-        // corruption (cursorPosCallback crash), so both panes are new.
-        // The original workspace stays hidden in the GtkStack.
-        guard let (glArea1, glPtr1) = createSplitGLArea(paneIndex: 0),
-              let (glArea2, glPtr2) = createSplitGLArea(paneIndex: 1) else {
-            cmuxLog("[split] Failed to create GL areas")
+        // Create one new GtkGLArea. Reparent the existing one into GtkPaned.
+        guard let (glArea2, glPtr2) = createSplitGLArea(paneIndex: 1) else {
+            cmuxLog("[split] Failed to create second pane")
             return
         }
+
+        guard let existingWidget = ws.contentWidget, let existingGlArea = ws.glArea else { return }
+        g_object_ref(UnsafeMutableRawPointer(existingWidget))
+        gtk_stack_remove(st, existingWidget)
 
         // Build GtkPaned
         let gtkOrientation: GtkOrientation = orientation == .horizontal
             ? GTK_ORIENTATION_HORIZONTAL : GTK_ORIENTATION_VERTICAL
-        guard let paned = gtk_paned_new(gtkOrientation) else { return }
+        guard let paned = gtk_paned_new(gtkOrientation) else {
+            let name = "ws-\(ws.id)"
+            name.withCString { cName in gtk_stack_add_named(st, existingWidget, cName) }
+            g_object_unref(UnsafeMutableRawPointer(existingWidget))
+            return
+        }
         let panedPtr = OpaquePointer(paned)
         gtk_widget_set_hexpand(paned, 1)
         gtk_widget_set_vexpand(paned, 1)
 
-        gtk_paned_set_start_child(panedPtr, glArea1)
+        gtk_paned_set_start_child(panedPtr, existingWidget)
         gtk_paned_set_resize_start_child(panedPtr, 1)
+        g_object_unref(UnsafeMutableRawPointer(existingWidget))
         gtk_paned_set_end_child(panedPtr, glArea2)
         gtk_paned_set_resize_end_child(panedPtr, 1)
         gtk_paned_set_shrink_end_child(panedPtr, 0)
         gtk_paned_set_shrink_start_child(panedPtr, 0)
 
-        // Set workspace fields BEFORE adding paned to content box
+        // Set workspace fields BEFORE adding paned
         workspaces[activeIndex].splitPanedWidget = paned
-        workspaces[activeIndex].splitFirstGlArea = glPtr1
+        workspaces[activeIndex].splitFirstGlArea = existingGlArea
+        workspaces[activeIndex].splitFirstSurface = ws.surface
         workspaces[activeIndex].splitSecondGlArea = glPtr2
 
-        // Hide GtkStack, show GtkPaned in content box
+        // Hide GtkStack, show GtkPaned
         let stackWidget = unsafeBitCast(st, to: UnsafeMutablePointer<GtkWidget>.self)
         gtk_widget_set_visible(stackWidget, 0)
         let contentBoxPtr = unsafeBitCast(contentBox, to: UnsafeMutablePointer<GtkBox>.self)
         gtk_box_append(contentBoxPtr, paned)
+
+        // Reinit renderer for existing surface (GL context changed from reparent)
+        splitTransitionInProgress = true
+        if let surface = ws.surface {
+            gtk_gl_area_make_current(existingGlArea)
+            _ = gApp.fn_surface_reinit_renderer?(surface)
+            gApp.fn_surface_refresh?(surface)
+        }
+        splitTransitionInProgress = false
 
         // Set divider to 50%
         let totalSize: Int32 = orientation == .horizontal
@@ -663,7 +680,7 @@ final class WorkspaceManager {
             : gtk_widget_get_height(unsafeBitCast(contentBox, to: UnsafeMutablePointer<GtkWidget>.self))
         if totalSize > 0 { gtk_paned_set_position(panedPtr, totalSize / 2) }
 
-        cmuxLog("[split] Visual split — two fresh panes, original hidden")
+        cmuxLog("[split] Visual split — existing terminal + new pane")
     }
 
     /// Close the split. Reparents the first pane's GtkGLArea back to the GtkStack
@@ -683,32 +700,68 @@ final class WorkspaceManager {
         let secondSurface = ws.splitSecondSurface ?? ws.splitSecondGlArea.flatMap({ paneManager.surfaceForGLArea($0) })
         let secondGlArea = ws.splitSecondGlArea
 
-        // Clear split state FIRST so activeSurface can't return freed pointers
+        // Clear split state FIRST so activeSurface returns ws.surface (the first pane)
+        let keepGlArea = ws.splitFirstGlArea
+        let keepSurface = ws.splitFirstSurface
         workspaces[activeIndex].splitPanedWidget = nil
         workspaces[activeIndex].splitFirstGlArea = nil
         workspaces[activeIndex].splitFirstSurface = nil
         workspaces[activeIndex].splitSecondGlArea = nil
         workspaces[activeIndex].splitSecondSurface = nil
         splitFocusedSecond = false
+        // Restore ws.surface to the first pane's surface
+        workspaces[activeIndex].surface = keepSurface
 
-        // Free both split surfaces
-        if let s1 = firstSurface { gApp.fn_surface_free?(s1) }
+        // Free the second surface only
         if let s2 = secondSurface { gApp.fn_surface_free?(s2) }
-        if let gl1 = firstGlArea { paneManager.removeSurface(glArea: gl1) }
         if let gl2 = secondGlArea { paneManager.removeSurface(glArea: gl2) }
 
-        // Remove the GtkPaned from content box (destroys paned + child GL areas)
+        // Reparent first pane's GtkGLArea back to the GtkStack
+        guard let keepGl = keepGlArea else {
+            splitTransitionInProgress = false
+            return
+        }
+        let firstWidget = unsafeBitCast(keepGl, to: UnsafeMutablePointer<GtkWidget>.self)
+        g_object_ref(UnsafeMutableRawPointer(firstWidget))
+        let panedPtr = OpaquePointer(splitPaned)
+        gtk_paned_set_start_child(panedPtr, nil)
+        gtk_paned_set_end_child(panedPtr, nil)
+
         let contentBoxPtr = unsafeBitCast(contentBox, to: UnsafeMutablePointer<GtkBox>.self)
         gtk_box_remove(contentBoxPtr, splitPaned)
 
-        // Show the GtkStack — the original workspace is still there untouched
+        let name = "ws-\(ws.id)"
+        name.withCString { cName in gtk_stack_add_named(st, firstWidget, cName) }
+        g_object_unref(UnsafeMutableRawPointer(firstWidget))
+
+        workspaces[activeIndex].contentWidget = firstWidget
+        workspaces[activeIndex].glArea = keepGl
+        globalGLArea = keepGl
+
+        // Show the GtkStack
         let stackWidget = unsafeBitCast(st, to: UnsafeMutablePointer<GtkWidget>.self)
         gtk_widget_set_visible(stackWidget, 1)
-        if let glArea = ws.glArea { globalGLArea = glArea }
         showActiveInStack()
-        splitTransitionInProgress = false
 
-        cmuxLog("[split] Closed split, restored original workspace")
+        // Workspace switch away+back forces GTK to re-realize the reparented GL area.
+        // This fixes the "renders after workspace switch" issue.
+        pendingSplitReturnIndex = activeIndex
+        if workspaces.count > 1 {
+            let awayIdx = activeIndex == 0 ? 1 : 0
+            switchTo(index: awayIdx)
+            g_timeout_add(100, { _ -> gboolean in
+                let idx = workspaceManager.pendingSplitReturnIndex
+                workspaceManager.pendingSplitReturnIndex = -1
+                workspaceManager.splitTransitionInProgress = false
+                if idx >= 0 { workspaceManager.switchTo(index: idx) }
+                return 0
+            }, nil)
+        } else {
+            pendingSplitReturnIndex = -1
+            splitTransitionInProgress = false
+        }
+
+        cmuxLog("[split] Closed split, first pane preserved")
     }
 
     /// Close the focused pane within a split, collapsing the split
