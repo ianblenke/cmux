@@ -665,25 +665,15 @@ final class WorkspaceManager {
         let contentBoxPtr = unsafeBitCast(contentBox, to: UnsafeMutablePointer<GtkBox>.self)
         gtk_box_append(contentBoxPtr, paned)
 
-        // Force the reparented GtkGLArea to re-realize by hiding then showing it.
-        // This makes GTK create a fresh GL context for the new parent.
-        let existWidget = unsafeBitCast(existingGlArea, to: UnsafeMutablePointer<GtkWidget>.self)
-        gtk_widget_set_visible(existWidget, 0)
-        gtk_widget_set_visible(existWidget, 1)
+        // Enable auto_render on the reparented GtkGLArea (was disabled by
+        // showActiveInStack which sets all workspace GLAreas to auto_render=0)
+        gtk_gl_area_set_auto_render(existingGlArea, 1)
 
-        // Reinit renderer after the new GL context is established
-        splitTransitionInProgress = true
-        g_timeout_add(50, { _ -> gboolean in
-            guard let ws = workspaceManager.activeWorkspace,
-                  let surface = ws.splitFirstSurface,
-                  let glArea = ws.splitFirstGlArea,
-                  let gApp = getGhosttyApp() else {
-                workspaceManager.splitTransitionInProgress = false
-                return 0
-            }
-            gtk_gl_area_make_current(glArea)
+        // Reinit renderer after reparent (GL context changed)
+        if let surface = ws.surface {
+            gtk_gl_area_make_current(existingGlArea)
             _ = gApp.fn_surface_reinit_renderer?(surface)
-            let widget = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
+            let widget = unsafeBitCast(existingGlArea, to: UnsafeMutablePointer<GtkWidget>.self)
             let w = gtk_widget_get_width(widget)
             let h = gtk_widget_get_height(widget)
             if w > 0 && h > 0 {
@@ -691,11 +681,10 @@ final class WorkspaceManager {
                 gApp.fn_surface_set_content_scale?(surface, scale, scale)
                 gApp.fn_surface_set_size?(surface, UInt32(w), UInt32(h))
             }
+            gApp.fn_surface_set_focus?(surface, true)
             gApp.fn_surface_refresh?(surface)
-            gtk_gl_area_queue_render(glArea)
-            workspaceManager.splitTransitionInProgress = false
-            return 0
-        }, nil)
+            gtk_gl_area_queue_render(existingGlArea)
+        }
 
         // Set divider to 50%
         let totalSize: Int32 = orientation == .horizontal
