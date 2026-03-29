@@ -152,15 +152,15 @@ final class WorkspaceManager {
 
         // Render callback
         let renderCb: @convention(c) (UnsafeMutablePointer<GtkGLArea>?, OpaquePointer?, gpointer?) -> gboolean = { glArea, ctx, _ in
-            // In split mode, the first pane uses splitFirstSurface
-            if let activeWs = workspaceManager.activeWorkspace, activeWs.isSplit {
-                if let s = activeWs.splitFirstSurface, activeWs.splitFirstGlArea == glArea {
-                    getGhosttyApp()?.drawSurface(s)
-                    return 1
-                }
+            guard let activeWs = workspaceManager.activeWorkspace else { return 1 }
+            // In split mode, draw splitFirstSurface for this GL area
+            if activeWs.isSplit, activeWs.splitFirstGlArea == glArea,
+               let s = activeWs.splitFirstSurface {
+                getGhosttyApp()?.drawSurface(s)
+                return 1
             }
-            guard let activeWs = workspaceManager.activeWorkspace,
-                  activeWs.glArea == glArea else { return 1 }
+            // Non-split: draw workspace surface
+            guard activeWs.glArea == glArea, !activeWs.isSplit else { return 1 }
             if let surface = activeWs.surface, let gApp = getGhosttyApp() {
                 gApp.drawSurface(surface)
             }
@@ -169,10 +169,19 @@ final class WorkspaceManager {
         g_signal_connect_data(newGlArea, "render",
             unsafeBitCast(renderCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
 
-        // Realize callback
+        // Realize callback — skip if this GL area already has a surface
+        // (happens when reparenting for splits: unrealize → realize fires
+        // but we want to keep the existing surface, not create a new one)
         let realizeCb: @convention(c) (UnsafeMutablePointer<GtkWidget>?, gpointer?) -> Void = { widget, _ in
             guard let widget = widget, let gApp = getGhosttyApp() else { return }
             let glPtr = unsafeBitCast(widget, to: UnsafeMutablePointer<GtkGLArea>.self)
+
+            // Skip if a workspace already has a surface for this GL area
+            for ws in workspaceManager.workspaces {
+                if ws.glArea == glPtr && ws.surface != nil { return }
+                if ws.splitFirstGlArea == glPtr && ws.splitFirstSurface != nil { return }
+            }
+
             gtk_gl_area_make_current(glPtr)
             let usedFds = Set(workspaceManager.workspaces.compactMap { $0.ptyMasterFd > 0 ? $0.ptyMasterFd : nil })
             let cwd = paneManager.getCwd(glArea: glPtr)
