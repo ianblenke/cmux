@@ -413,14 +413,10 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
                 let inSecond = orientation == GTK_ORIENTATION_VERTICAL ? y > Double(pos) : x > Double(pos)
                 if inSecond {
                     workspaceManager.splitFocusedSecond = true
-                    if let s1 = ws.surface { gApp.fn_surface_set_focus?(s1, false) }
+                    let s1 = ws.splitFirstSurface ?? ws.splitFirstGlArea.flatMap({ paneManager.surfaceForGLArea($0) })
+                    if let s1 = s1 { gApp.fn_surface_set_focus?(s1, false) }
                     let s2 = ws.splitSecondSurface ?? ws.splitSecondGlArea.flatMap({ paneManager.surfaceForGLArea($0) })
-                    if let s2 = s2 {
-                        gApp.fn_surface_set_focus?(s2, true)
-                        if ws.splitSecondSurface == nil {
-                            workspaceManager.workspaces[workspaceManager.activeIndex].splitSecondSurface = s2
-                        }
-                    }
+                    if let s2 = s2 { gApp.fn_surface_set_focus?(s2, true) }
                     if let gl = ws.splitSecondGlArea {
                         _ = gtk_widget_grab_focus(unsafeBitCast(gl, to: UnsafeMutablePointer<GtkWidget>.self))
                     }
@@ -428,8 +424,9 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
                     workspaceManager.splitFocusedSecond = false
                     let s2 = ws.splitSecondSurface ?? ws.splitSecondGlArea.flatMap({ paneManager.surfaceForGLArea($0) })
                     if let s2 = s2 { gApp.fn_surface_set_focus?(s2, false) }
-                    if let s1 = ws.surface { gApp.fn_surface_set_focus?(s1, true) }
-                    if let gl = ws.glArea {
+                    let s1 = ws.splitFirstSurface ?? ws.splitFirstGlArea.flatMap({ paneManager.surfaceForGLArea($0) })
+                    if let s1 = s1 { gApp.fn_surface_set_focus?(s1, true) }
+                    if let gl = ws.splitFirstGlArea {
                         _ = gtk_widget_grab_focus(unsafeBitCast(gl, to: UnsafeMutablePointer<GtkWidget>.self))
                     }
                 }
