@@ -154,10 +154,23 @@ final class WorkspaceManager {
         g_signal_connect_data(newGlArea, "render",
             unsafeBitCast(renderCb, to: GCallback.self), nil, nil, GConnectFlags(rawValue: 0))
 
-        // Realize callback
+        // Realize callback — skip if a surface already exists for this GL area
+        // (e.g. during reparenting for splits, the widget gets unrealized/realized
+        // but the surface should be preserved)
         let realizeCb: @convention(c) (UnsafeMutablePointer<GtkWidget>?, gpointer?) -> Void = { widget, _ in
             guard let widget = widget, let gApp = getGhosttyApp() else { return }
             let glPtr = unsafeBitCast(widget, to: UnsafeMutablePointer<GtkGLArea>.self)
+
+            // Check if this GL area already has a surface (reparent case)
+            for ws in workspaceManager.workspaces {
+                if ws.glArea == glPtr && ws.surface != nil {
+                    cmuxLog("[workspace] Realize skipped — surface already exists (reparent)")
+                    gtk_gl_area_make_current(glPtr)
+                    gApp.fn_surface_refresh?(ws.surface!)
+                    return
+                }
+            }
+
             gtk_gl_area_make_current(glPtr)
             let usedFds = Set(workspaceManager.workspaces.compactMap { $0.ptyMasterFd > 0 ? $0.ptyMasterFd : nil })
             let cwd = paneManager.getCwd(glArea: glPtr)
@@ -745,42 +758,41 @@ final class WorkspaceManager {
         workspaces[activeIndex].splitSecondSurface = nil
         splitFocusedSecond = false
 
-        // Show the GtkStack
+        // Show the GtkStack and reactivate
         let stackWidget = unsafeBitCast(st, to: UnsafeMutablePointer<GtkWidget>.self)
         gtk_widget_set_visible(stackWidget, 1)
         globalGLArea = existingGlArea
+        showActiveInStack()
 
-        // Defer the full reactivation to let GTK finish the reparent layout.
-        // showActiveInStack + reinit_renderer need the widget to be fully
-        // realized in its new parent.
-        g_timeout_add(50, { _ -> gboolean in
-            guard let ws = workspaceManager.activeWorkspace,
-                  let surface = ws.surface,
-                  let glArea = ws.glArea,
-                  let gApp = getGhosttyApp() else { return 0 }
-            let widget = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
-
-            // Switch visible child and enable auto_render
-            workspaceManager.showActiveInStack()
-
-            // Reinitialize the renderer after reparenting
-            gtk_gl_area_make_current(glArea)
-            _ = gApp.fn_surface_reinit_renderer?(surface)
-
-            // Apply full size
-            let w = gtk_widget_get_width(widget)
-            let h = gtk_widget_get_height(widget)
-            if w > 0 && h > 0 {
-                let scale = Double(gtk_widget_get_scale_factor(widget))
-                gApp.fn_surface_set_content_scale?(surface, scale, scale)
-                gApp.fn_surface_set_size?(surface, UInt32(w), UInt32(h))
+        // The GL context needs a full refresh after reparenting.
+        // Simulate what the user does manually: switch away and back.
+        let currentIdx = activeIndex
+        if workspaces.count > 1 {
+            let otherIdx = currentIdx == 0 ? 1 : 0
+            g_timeout_add(50, { _ -> gboolean in
+                let target = workspaceManager.activeIndex == 0 ? 1 : 0
+                // Brief switch away
+                workspaceManager.showActiveInStack()
+                let savedIdx = workspaceManager.activeIndex
+                workspaceManager.activeIndex = target
+                workspaceManager.showActiveInStack()
+                // Switch back
+                workspaceManager.activeIndex = savedIdx
+                workspaceManager.showActiveInStack()
+                if let ws = workspaceManager.activeWorkspace,
+                   let glArea = ws.glArea {
+                    _ = gtk_widget_grab_focus(unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self))
+                }
+                return 0
+            }, nil)
+        } else {
+            // Only one workspace — just force refresh
+            if let s = ws.surface {
+                gApp.fn_surface_set_focus?(s, true)
+                gApp.fn_surface_refresh?(s)
             }
-            gApp.fn_surface_set_focus?(surface, true)
-            gApp.fn_surface_refresh?(surface)
-            gtk_gl_area_queue_render(glArea)
-            _ = gtk_widget_grab_focus(widget)
-            return 0
-        }, nil)
+            _ = gtk_widget_grab_focus(existingWidget)
+        }
 
         cmuxLog("[split] Closed split, restored single pane")
     }
