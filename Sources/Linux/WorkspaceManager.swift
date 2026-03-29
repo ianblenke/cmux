@@ -707,11 +707,22 @@ final class WorkspaceManager {
         guard let gApp = getGhosttyApp() else { return }
         guard let firstGlArea = ws.splitFirstGlArea else { return }
 
-        // Free the second surface only
-        if let s2 = ws.splitSecondSurface ?? ws.splitSecondGlArea.flatMap({ paneManager.surfaceForGLArea($0) }) {
-            gApp.fn_surface_free?(s2)
-        }
-        if let gl2 = ws.splitSecondGlArea { paneManager.removeSurface(glArea: gl2) }
+        // Save refs before clearing state
+        let secondSurface = ws.splitSecondSurface ?? ws.splitSecondGlArea.flatMap({ paneManager.surfaceForGLArea($0) })
+        let secondGlArea = ws.splitSecondGlArea
+
+        // Clear split state FIRST so activeSurface can't return freed pointers
+        workspaces[activeIndex].surface = ws.splitFirstSurface
+        workspaces[activeIndex].splitPanedWidget = nil
+        workspaces[activeIndex].splitFirstGlArea = nil
+        workspaces[activeIndex].splitFirstSurface = nil
+        workspaces[activeIndex].splitSecondGlArea = nil
+        workspaces[activeIndex].splitSecondSurface = nil
+        splitFocusedSecond = false
+
+        // Now free the second surface
+        if let s2 = secondSurface { gApp.fn_surface_free?(s2) }
+        if let gl2 = secondGlArea { paneManager.removeSurface(glArea: gl2) }
 
         // Ref the first pane's widget before unparenting from GtkPaned
         let firstWidget = unsafeBitCast(firstGlArea, to: UnsafeMutablePointer<GtkWidget>.self)
@@ -729,16 +740,9 @@ final class WorkspaceManager {
         name.withCString { cName in gtk_stack_add_named(st, firstWidget, cName) }
         g_object_unref(UnsafeMutableRawPointer(firstWidget))
 
-        // Update workspace — the first pane becomes the workspace's surface
+        // Update workspace widget refs (split state already cleared above)
         workspaces[activeIndex].contentWidget = firstWidget
         workspaces[activeIndex].glArea = firstGlArea
-        workspaces[activeIndex].surface = ws.splitFirstSurface
-        workspaces[activeIndex].splitPanedWidget = nil
-        workspaces[activeIndex].splitFirstGlArea = nil
-        workspaces[activeIndex].splitFirstSurface = nil
-        workspaces[activeIndex].splitSecondGlArea = nil
-        workspaces[activeIndex].splitSecondSurface = nil
-        splitFocusedSecond = false
 
         // Show the GtkStack and reinit renderer for the reparented GL area
         let stackWidget = unsafeBitCast(st, to: UnsafeMutablePointer<GtkWidget>.self)
