@@ -71,11 +71,17 @@ private let writeClipboardCb: @convention(c) (
     }
 }
 
+/// Set to true during app shutdown to prevent surface close callbacks
+/// from manipulating widgets that are being destroyed.
+var appIsShuttingDown = false
+
 private let closeSurfaceCb: @convention(c) (
     UnsafeMutableRawPointer?, Bool
 ) -> Void = { _, processActive in
+    if appIsShuttingDown { return }
     cmuxLog("[GhosttyBridge] Surface close requested (processActive=\(processActive))")
     g_idle_add({ _ -> gboolean in
+        if appIsShuttingDown { return 0 }
         // If the active workspace is split, collapse the split instead of closing
         if let ws = workspaceManager.activeWorkspace, ws.isSplit {
             workspaceManager.closeSplit()

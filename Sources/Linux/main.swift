@@ -491,6 +491,7 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
 
     // Save session when window is closed
     let closeCb: @convention(c) (OpaquePointer?, gpointer?) -> gboolean = { _, _ in
+        appIsShuttingDown = true
         LinuxSessionPersistence.save()
         socketServer?.stop()
         return 0  // Allow close
