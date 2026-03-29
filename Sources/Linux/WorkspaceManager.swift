@@ -57,6 +57,8 @@ final class WorkspaceManager {
 
     /// True during split open/close to suppress mouse events to freed surfaces
     var splitTransitionInProgress: Bool = false
+    /// Index to return to after split close workspace switch trick
+    var pendingSplitReturnIndex: Int = -1
 
     var activeSurface: UnsafeMutableRawPointer? {
         if let ws = activeWorkspace, ws.isSplit {
@@ -755,41 +757,25 @@ final class WorkspaceManager {
         globalGLArea = firstGlArea
         showActiveInStack()
 
-        // Deferred reinit after GTK finishes the reparent layout
-        g_timeout_add(100, { _ -> gboolean in
-            workspaceManager.splitTransitionInProgress = false
-            guard let ws = workspaceManager.activeWorkspace,
-                  let surface = ws.surface,
-                  let glArea = ws.glArea,
-                  let gApp = getGhosttyApp() else { return 0 }
-            let widget = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
-            gtk_gl_area_make_current(glArea)
-            _ = gApp.fn_surface_reinit_renderer?(surface)
-            let w = gtk_widget_get_width(widget)
-            let h = gtk_widget_get_height(widget)
-            if w > 0 && h > 0 {
-                let scale = Double(gtk_widget_get_scale_factor(widget))
-                gApp.fn_surface_set_content_scale?(surface, scale, scale)
-                gApp.fn_surface_set_size?(surface, UInt32(w), UInt32(h))
-            }
-            gApp.fn_surface_set_focus?(surface, true)
-            gApp.fn_surface_refresh?(surface)
-            gtk_gl_area_queue_render(glArea)
-            _ = gtk_widget_grab_focus(widget)
-            // Second focus attempt after another frame
-            g_timeout_add(100, { _ -> gboolean in
-                if let ws = workspaceManager.activeWorkspace,
-                   let surface = ws.surface,
-                   let glArea = ws.glArea,
-                   let gApp = getGhosttyApp() {
-                    gApp.fn_surface_set_focus?(surface, true)
-                    let w = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
-                    _ = gtk_widget_grab_focus(w)
+        // After reparenting, GtkGLArea render signal doesn't fire.
+        // Workaround: switch away then back to force GTK to re-realize.
+        splitTransitionInProgress = false
+        pendingSplitReturnIndex = activeIndex
+        if workspaces.count > 1 {
+            let awayIdx = activeIndex == 0 ? 1 : 0
+            switchTo(index: awayIdx)
+            g_timeout_add(50, { _ -> gboolean in
+                if workspaceManager.pendingSplitReturnIndex >= 0 {
+                    let idx = workspaceManager.pendingSplitReturnIndex
+                    workspaceManager.pendingSplitReturnIndex = -1
+                    workspaceManager.switchTo(index: idx)
                 }
                 return 0
             }, nil)
-            return 0
-        }, nil)
+        } else {
+            pendingSplitReturnIndex = -1
+            showActiveInStack()
+        }
 
         cmuxLog("[split] Closed split, first pane preserved")
     }
