@@ -756,7 +756,8 @@ final class WorkspaceManager {
         showActiveInStack()
 
         // Deferred reinit after GTK finishes the reparent layout
-        g_timeout_add(50, { _ -> gboolean in
+        g_timeout_add(100, { _ -> gboolean in
+            workspaceManager.splitTransitionInProgress = false
             guard let ws = workspaceManager.activeWorkspace,
                   let surface = ws.surface,
                   let glArea = ws.glArea,
@@ -775,7 +776,18 @@ final class WorkspaceManager {
             gApp.fn_surface_refresh?(surface)
             gtk_gl_area_queue_render(glArea)
             _ = gtk_widget_grab_focus(widget)
-            workspaceManager.splitTransitionInProgress = false
+            // Second focus attempt after another frame
+            g_timeout_add(100, { _ -> gboolean in
+                if let ws = workspaceManager.activeWorkspace,
+                   let surface = ws.surface,
+                   let glArea = ws.glArea,
+                   let gApp = getGhosttyApp() {
+                    gApp.fn_surface_set_focus?(surface, true)
+                    let w = unsafeBitCast(glArea, to: UnsafeMutablePointer<GtkWidget>.self)
+                    _ = gtk_widget_grab_focus(w)
+                }
+                return 0
+            }, nil)
             return 0
         }, nil)
 
