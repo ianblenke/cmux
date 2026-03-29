@@ -103,13 +103,13 @@ func activateApp(_ appPtr: OpaquePointer?, userData: gpointer?) {
             // Resize is now handled immediately in the GtkGLArea resize callback.
             // No debounce needed — ghostty handles rapid set_size calls.
 
-            // Queue render on active workspace (+ split pane if any)
+            // Queue render on active workspace (+ split panes if any)
             if let ws = workspaceManager.activeWorkspace {
-                if let glArea = ws.glArea {
+                if ws.isSplit {
+                    if let gl1 = ws.splitFirstGlArea { gtk_gl_area_queue_render(gl1) }
+                    if let gl2 = ws.splitSecondGlArea { gtk_gl_area_queue_render(gl2) }
+                } else if let glArea = ws.glArea {
                     gtk_gl_area_queue_render(glArea)
-                }
-                if let gl2 = ws.splitSecondGlArea {
-                    gtk_gl_area_queue_render(gl2)
                 }
             }
             return 1
